@@ -4,7 +4,7 @@ Client-side BM25 tool search for the Anthropic SDK. Use thousands of tools witho
 
 ## The problem
 
-The Anthropic API requires you to send all tool definitions in every request. With 100+ tools, this wastes tokens and degrades tool selection. Anthropic offers a server-side `tool_search_tool_bm25`, but it's closed-source, not ZDR-eligible, and unavailable on some platforms (e.g. Bedrock).
+The Anthropic API requires you to send all tool definitions in every request. With 100+ tools, this wastes tokens and degrades tool selection. Anthropic offers a server-side `tool_search_tool_bm25`, but it's not available on all platforms (e.g. Bedrock) and doesn't work with ZDR. Dehydrator gives you the same capability client-side, so it works everywhere.
 
 ## How it works
 
