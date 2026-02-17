@@ -1,0 +1,47 @@
+[project]
+name = "dehydrator"
+version = "0.1.0"
+description = "Client-side BM25 tool search for the Anthropic SDK"
+readme = "README.md"
+license = "MIT"
+authors = [
+    { name = "arrmlet", email = "trubavolodymyr@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "anthropic>=0.40.0",
+    "rank-bm25>=0.2.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/arrmlet/dehydrator"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[tool.mypy]
+strict = true
+
+[[tool.mypy.overrides]]
+module = "rank_bm25"
+ignore_missing_imports = true
+follow_untyped_imports = true
+
+[[tool.mypy.overrides]]
+module = "dehydrator._index"
+disallow_untyped_calls = false
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
