@@ -123,3 +123,62 @@ def test_duplicate_tool_names_raises():
 def test_empty_query():
     index = ToolIndex(TOOLS)
     assert index.search("") == []
+
+
+def test_mcp_format_tools():
+    """ToolIndex works with MCP camelCase inputSchema tools."""
+    mcp_tools = [
+        {
+            "name": "get_weather",
+            "description": "Get the current weather for a location",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "city": {"type": "string", "description": "City name"},
+                },
+            },
+        },
+        {
+            "name": "send_email",
+            "description": "Send an email message to a recipient",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "to": {"type": "string", "description": "Email address"},
+                },
+            },
+        },
+    ]
+    index = ToolIndex(mcp_tools, top_k=2)
+    results = index.search("weather forecast")
+    assert "get_weather" in results
+
+
+def test_from_mcp():
+    """ToolIndex.from_mcp converts MCP Tool objects to dicts."""
+    from unittest.mock import MagicMock
+
+    tool1 = MagicMock()
+    tool1.name = "get_weather"
+    tool1.description = "Get the current weather"
+    tool1.inputSchema = {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "City name"},
+        },
+    }
+
+    tool2 = MagicMock()
+    tool2.name = "send_email"
+    tool2.description = "Send an email message"
+    tool2.inputSchema = {
+        "type": "object",
+        "properties": {
+            "to": {"type": "string", "description": "Email address"},
+        },
+    }
+
+    index = ToolIndex.from_mcp([tool1, tool2], top_k=2)
+    assert set(index.tool_names) == {"get_weather", "send_email"}
+    results = index.search("weather")
+    assert "get_weather" in results

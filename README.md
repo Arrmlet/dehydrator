@@ -1,14 +1,16 @@
 # Dehydrator
 
-Client-side BM25 tool search for the Anthropic SDK. Use thousands of tools without bloating the context window.
+Client-side BM25 tool search for LLM APIs. Use thousands of tools without bloating the context window.
+
+Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively.
 
 ## The problem
 
-The Anthropic API requires you to send all tool definitions in every request. With 100+ tools, this wastes tokens and degrades tool selection. Anthropic offers a server-side `tool_search_tool_bm25`, but it's not available on all platforms (e.g. Bedrock) and doesn't work with ZDR. Dehydrator gives you the same capability client-side, so it works everywhere.
+LLM APIs require you to send all tool definitions in every request. With 100+ tools, this wastes tokens and degrades tool selection. Anthropic offers a server-side `tool_search_tool_bm25`, but it's not available on all platforms (e.g. Bedrock) and doesn't work with ZDR. Dehydrator gives you the same capability client-side, so it works everywhere — with any provider.
 
 ## How it works
 
-Dehydrator wraps your Anthropic client and replaces the full tool list with a single `tool_search` tool. When Claude needs a tool, it searches by description. Dehydrator intercepts the call, runs BM25 locally, and re-calls the API with only the matched tools injected.
+Dehydrator wraps your LLM client and replaces the full tool list with a single `tool_search` tool. When the model needs a tool, it searches by description. Dehydrator intercepts the call, runs BM25 locally, and re-calls the API with only the matched tools injected.
 
 ```
 User request
@@ -18,7 +20,7 @@ User request
 │  API call #1                │
 │  tools = [tool_search]      │
 │                             │
-│  Claude responds:           │
+│  Model responds:            │
 │  tool_search("send email")  │
 └─────────────┬───────────────┘
               │  intercepted by Dehydrator
@@ -36,7 +38,7 @@ User request
 │           send_email,        │
 │           send_slack_message]│
 │                             │
-│  Claude responds:           │
+│  Model responds:            │
 │  send_email({...})          │
 └─────────────────────────────┘
               │
@@ -44,7 +46,7 @@ User request
         Returned to you
 ```
 
-Only the tools Claude actually needs are ever sent. Discovered tools persist across turns within a conversation.
+Only the tools the model actually needs are ever sent. Discovered tools persist across turns within a conversation.
 
 ## Installation
 
@@ -54,36 +56,11 @@ pip install dehydrator
 
 ## Quick start
 
+### Anthropic
+
 ```python
 import anthropic
 from dehydrator import DehydratedClient
-
-tools = [
-    {
-        "name": "get_weather",
-        "description": "Get the current weather for a location",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "city": {"type": "string", "description": "City name"},
-            },
-            "required": ["city"],
-        },
-    },
-    {
-        "name": "send_email",
-        "description": "Send an email message to a recipient",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "to": {"type": "string"},
-                "body": {"type": "string"},
-            },
-            "required": ["to", "body"],
-        },
-    },
-    # ... hundreds more tools
-]
 
 client = DehydratedClient(
     anthropic.Anthropic(),
@@ -98,16 +75,56 @@ response = client.messages.create(
 )
 ```
 
-The response is a standard `anthropic.types.Message` — handle tool calls exactly as you normally would.
+The response is a standard `anthropic.types.Message`.
+
+### OpenAI-compatible (OpenAI, Groq, OpenRouter, Chutes, etc.)
+
+```python
+from openai import OpenAI
+from dehydrator import OpenAIDehydratedClient
+
+client = OpenAIDehydratedClient(
+    OpenAI(),
+    tools=tools,
+    top_k=5,
+)
+
+response = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "What's the weather in Tokyo?"}],
+)
+```
+
+Works with any client that implements `client.chat.completions.create()`. No `openai` import required — fully duck-typed.
+
+### MCP tools
+
+Tools from MCP servers use `inputSchema` (camelCase) instead of `input_schema`. Dehydrator accepts both formats automatically:
+
+```python
+# MCP format tools work directly
+tools = [
+    {"name": "get_weather", "description": "...", "inputSchema": {...}},
+]
+client = DehydratedClient(anthropic.Anthropic(), tools=tools)
+
+# Or use mcp.types.Tool objects with ToolIndex.from_mcp()
+from dehydrator import ToolIndex
+
+tools = await session.list_tools()  # returns list[mcp.types.Tool]
+index = ToolIndex.from_mcp(tools, top_k=5)
+```
 
 ## API
 
 ### `DehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3)`
 
+Wraps an `anthropic.Anthropic` client.
+
 | Parameter | Type | Description |
 |---|---|---|
 | `client` | `anthropic.Anthropic` | An Anthropic SDK client instance |
-| `tools` | `list[dict]` | All tool definitions |
+| `tools` | `list[dict]` | Tool definitions (Anthropic or MCP format) |
 | `top_k` | `int` | Max tools returned per search (default: 5) |
 | `always_available` | `list[str]` | Tool names to include in every request, bypassing search |
 | `max_search_rounds` | `int` | Max search iterations per `create()` call (default: 3) |
@@ -122,21 +139,27 @@ The response is a standard `anthropic.types.Message` — handle tool calls exact
 
 Same API as `DehydratedClient`, but wraps `anthropic.AsyncAnthropic` and `create()` is async.
 
-```python
-import anthropic
-from dehydrator import AsyncDehydratedClient
+### `OpenAIDehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3)`
 
-client = AsyncDehydratedClient(
-    anthropic.AsyncAnthropic(),
-    tools=tools,
-)
+Wraps any OpenAI-compatible client.
 
-response = await client.messages.create(
-    model="claude-sonnet-4-6",
-    max_tokens=1024,
-    messages=[{"role": "user", "content": "Send an email to alice@example.com"}],
-)
-```
+| Parameter | Type | Description |
+|---|---|---|
+| `client` | any | Any client with `client.chat.completions.create()` |
+| `tools` | `list[dict]` | Tool definitions (Anthropic or MCP format — converted to OpenAI format automatically) |
+| `top_k` | `int` | Max tools returned per search (default: 5) |
+| `always_available` | `list[str]` | Tool names to include in every request, bypassing search |
+| `max_search_rounds` | `int` | Max search iterations per `create()` call (default: 3) |
+
+#### Methods
+
+- **`client.chat.completions.create(**kwargs)`** — Same signature as the OpenAI SDK. The `tools` kwarg is ignored. Returns the provider's response object.
+- **`client.reset_discoveries()`** — Clears discovered tools.
+- **`client.inner`** — Access the underlying client.
+
+### `AsyncOpenAIDehydratedClient`
+
+Same API as `OpenAIDehydratedClient`, but `create()` is async.
 
 ### `ToolIndex`
 
@@ -148,6 +171,9 @@ from dehydrator import ToolIndex
 index = ToolIndex(tools, top_k=5)
 matched_names = index.search("weather forecast")
 matched_tools = index.get_tools(matched_names)
+
+# From MCP Tool objects
+index = ToolIndex.from_mcp(mcp_tools, top_k=5)
 ```
 
 ## Always-available tools
@@ -166,12 +192,12 @@ These tools are sent in every request without requiring a search.
 
 ## Multi-turn conversations
 
-Discovered tools persist across calls to `create()`. If Claude found `send_email` in turn 1, it's still available in turn 2 without re-searching.
+Discovered tools persist across calls to `create()`. If the model found `send_email` in turn 1, it's still available in turn 2 without re-searching.
 
 Call `client.reset_discoveries()` when starting a new conversation:
 
 ```python
-# Turn 1: Claude discovers send_email
+# Turn 1: model discovers send_email
 response = client.messages.create(...)
 
 # Turn 2: send_email is still available

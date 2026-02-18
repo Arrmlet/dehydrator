@@ -3,23 +3,26 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from dehydrator._types import get_tool_description, get_tool_name, get_tool_schema
+
 
 def tokenize_tool(tool: dict[str, Any]) -> list[str]:
     """Extract searchable tokens from a tool definition.
 
-    Pulls text from the tool name, description, and input_schema
+    Pulls text from the tool name, description, and input schema
     (property names, descriptions, enum values) and returns a flat
-    list of lowercase tokens.
+    list of lowercase tokens.  Accepts both Anthropic (``input_schema``)
+    and MCP (``inputSchema``) key conventions.
     """
     tokens: list[str] = []
 
-    name = tool.get("name", "")
+    name = get_tool_name(tool)
     tokens.extend(_split_identifier(name))
 
-    description = tool.get("description", "")
+    description = get_tool_description(tool)
     tokens.extend(_tokenize_text(description))
 
-    schema = tool.get("input_schema", {})
+    schema = get_tool_schema(tool)
     _walk_schema(schema, tokens)
 
     return tokens

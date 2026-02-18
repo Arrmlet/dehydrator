@@ -8,3 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+
+# Lock file (library — let consumers resolve deps)
+uv.lock
+.python-version

@@ -1,7 +1,7 @@
 [project]
 name = "dehydrator"
-version = "0.1.0"
-description = "Client-side BM25 tool search for the Anthropic SDK"
+version = "0.2.0"
+description = "Client-side BM25 tool search for LLM APIs — Anthropic, OpenAI-compatible, and MCP"
 readme = "README.md"
 license = "MIT"
 authors = [
@@ -10,6 +10,7 @@ authors = [
 requires-python = ">=3.10"
 dependencies = [
     "anthropic>=0.40.0",
+    "mcp>=1.26.0",
     "rank-bm25>=0.2.2",
 ]
 

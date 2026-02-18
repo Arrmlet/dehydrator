@@ -88,3 +88,21 @@ def test_empty_tool():
     tool = {"name": "", "description": "", "input_schema": {}}
     tokens = tokenize_tool(tool)
     assert tokens == []
+
+
+def test_mcp_format_input_schema():
+    """Tools using MCP camelCase inputSchema are tokenized correctly."""
+    tool = {
+        "name": "get_weather",
+        "description": "Get weather forecast",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string", "description": "City name"},
+            },
+        },
+    }
+    tokens = tokenize_tool(tool)
+    assert "get" in tokens
+    assert "weather" in tokens
+    assert "city" in tokens

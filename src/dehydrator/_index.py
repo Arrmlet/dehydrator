@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from typing import Any
+
 from rank_bm25 import BM25L
 
 from dehydrator._tokenizer import tokenize_query, tokenize_tool
-from dehydrator._types import ToolParam
+from dehydrator._types import ToolParam, get_tool_name, mcp_tool_to_dict
 
 
 class ToolIndex:
@@ -16,7 +18,7 @@ class ToolIndex:
         corpus: list[list[str]] = []
         names: list[str] = []
         for tool in tools:
-            name = tool["name"]
+            name = get_tool_name(tool)
             if name in self._tools_by_name:
                 raise ValueError(f"Duplicate tool name: {name!r}")
             self._tools_by_name[name] = tool
@@ -25,6 +27,11 @@ class ToolIndex:
         self._names = names
         self._bm25 = BM25L(corpus)
         self._top_k = top_k
+
+    @classmethod
+    def from_mcp(cls, tools: list[Any], *, top_k: int = 5) -> ToolIndex:
+        """Create a ToolIndex from a list of ``mcp.types.Tool`` objects."""
+        return cls([mcp_tool_to_dict(t) for t in tools], top_k=top_k)
 
     @property
     def tool_names(self) -> list[str]:

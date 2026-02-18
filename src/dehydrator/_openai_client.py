@@ -1,95 +1,92 @@
 from __future__ import annotations
 
-from typing import Any, cast
+from typing import Any
 
-import anthropic
-
-from dehydrator._adapter import AnthropicAdapter
+from dehydrator._adapter import OpenAIAdapter
 from dehydrator._index import ToolIndex
 from dehydrator._interceptor import async_send, send
 from dehydrator._search_tool import SEARCH_TOOL_NAME
 from dehydrator._types import ToolParam, get_tool_name
 
 
-class _Messages:
-    """Namespace that mimics ``client.messages`` for sync usage."""
+class _ChatCompletions:
+    """Namespace that mimics ``client.chat.completions`` for sync usage."""
 
-    def __init__(self, parent: DehydratedClient) -> None:
+    def __init__(self, parent: OpenAIDehydratedClient) -> None:
         self._parent = parent
 
-    def create(self, **kwargs: Any) -> anthropic.types.Message:
+    def create(self, **kwargs: Any) -> Any:
         if kwargs.get("stream"):
             raise NotImplementedError(
-                "Streaming is not yet supported by DehydratedClient. "
-                "Pass stream=False or omit it."
-            )
-        # Strip tools from kwargs — we manage them
-        kwargs.pop("tools", None)
-        return cast(
-            anthropic.types.Message,
-            send(
-                client=self._parent._client,
-                adapter=AnthropicAdapter(),
-                index=self._parent._index,
-                always_available=self._parent._always_available,
-                discovered=self._parent._discovered,
-                max_search_rounds=self._parent._max_search_rounds,
-                **kwargs,
-            ),
-        )
-
-
-class _AsyncMessages:
-    """Namespace that mimics ``client.messages`` for async usage."""
-
-    def __init__(self, parent: AsyncDehydratedClient) -> None:
-        self._parent = parent
-
-    async def create(self, **kwargs: Any) -> anthropic.types.Message:
-        if kwargs.get("stream"):
-            raise NotImplementedError(
-                "Streaming is not yet supported by AsyncDehydratedClient. "
+                "Streaming is not yet supported by OpenAIDehydratedClient. "
                 "Pass stream=False or omit it."
             )
         kwargs.pop("tools", None)
-        return cast(
-            anthropic.types.Message,
-            await async_send(
-                client=self._parent._client,
-                adapter=AnthropicAdapter(),
-                index=self._parent._index,
-                always_available=self._parent._always_available,
-                discovered=self._parent._discovered,
-                max_search_rounds=self._parent._max_search_rounds,
-                **kwargs,
-            ),
+        return send(
+            client=self._parent._client,
+            adapter=OpenAIAdapter(),
+            index=self._parent._index,
+            always_available=self._parent._always_available,
+            discovered=self._parent._discovered,
+            max_search_rounds=self._parent._max_search_rounds,
+            **kwargs,
         )
 
 
-class DehydratedClient:
-    """Wraps an ``anthropic.Anthropic`` client with transparent BM25 tool search.
+class _AsyncChatCompletions:
+    """Namespace that mimics ``client.chat.completions`` for async usage."""
 
-    Instead of sending all tools in every request, only a search tool and
-    ``always_available`` tools are sent. When Claude calls the search tool,
-    BM25 is run locally and matching tools are added to the next request.
+    def __init__(self, parent: AsyncOpenAIDehydratedClient) -> None:
+        self._parent = parent
+
+    async def create(self, **kwargs: Any) -> Any:
+        if kwargs.get("stream"):
+            raise NotImplementedError(
+                "Streaming is not yet supported by AsyncOpenAIDehydratedClient. "
+                "Pass stream=False or omit it."
+            )
+        kwargs.pop("tools", None)
+        return await async_send(
+            client=self._parent._client,
+            adapter=OpenAIAdapter(),
+            index=self._parent._index,
+            always_available=self._parent._always_available,
+            discovered=self._parent._discovered,
+            max_search_rounds=self._parent._max_search_rounds,
+            **kwargs,
+        )
+
+
+class _Chat:
+    """Namespace that mimics ``client.chat``."""
+
+    def __init__(self, completions: _ChatCompletions | _AsyncChatCompletions) -> None:
+        self.completions = completions
+
+
+class OpenAIDehydratedClient:
+    """Wraps any OpenAI-compatible client with transparent BM25 tool search.
+
+    Works with ``openai.OpenAI``, Groq, OpenRouter, Chutes, and any other
+    client that implements ``client.chat.completions.create()``.
 
     Usage::
 
-        client = DehydratedClient(
-            anthropic.Anthropic(),
+        from openai import OpenAI
+        client = OpenAIDehydratedClient(
+            OpenAI(),
             tools=all_my_tools,
             top_k=5,
         )
-        response = client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=1024,
+        response = client.chat.completions.create(
+            model="gpt-4o",
             messages=[{"role": "user", "content": "Send an email"}],
         )
     """
 
     def __init__(
         self,
-        client: anthropic.Anthropic,
+        client: Any,
         tools: list[ToolParam],
         *,
         top_k: int = 5,
@@ -106,11 +103,11 @@ class DehydratedClient:
         self._index = ToolIndex(all_tools, top_k=top_k)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
-        self.messages = _Messages(self)
+        self.chat = _Chat(_ChatCompletions(self))
 
     @property
-    def inner(self) -> anthropic.Anthropic:
-        """The underlying Anthropic client."""
+    def inner(self) -> Any:
+        """The underlying OpenAI-compatible client."""
         return self._client
 
     def reset_discoveries(self) -> None:
@@ -141,24 +138,24 @@ class DehydratedClient:
         return searchable, always
 
 
-class AsyncDehydratedClient:
-    """Async version of :class:`DehydratedClient`.
+class AsyncOpenAIDehydratedClient:
+    """Async version of :class:`OpenAIDehydratedClient`.
 
-    Wraps an ``anthropic.AsyncAnthropic`` client.
+    Wraps any async OpenAI-compatible client.
     """
 
     def __init__(
         self,
-        client: anthropic.AsyncAnthropic,
+        client: Any,
         tools: list[ToolParam],
         *,
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
     ) -> None:
-        DehydratedClient._validate_tool_names(tools)
+        OpenAIDehydratedClient._validate_tool_names(tools)
         self._client = client
-        all_tools, self._always_available = DehydratedClient._split_tools(
+        all_tools, self._always_available = OpenAIDehydratedClient._split_tools(
             tools, always_available or []
         )
         if not all_tools:
@@ -166,11 +163,11 @@ class AsyncDehydratedClient:
         self._index = ToolIndex(all_tools, top_k=top_k)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
-        self.messages = _AsyncMessages(self)
+        self.chat = _Chat(_AsyncChatCompletions(self))
 
     @property
-    def inner(self) -> anthropic.AsyncAnthropic:
-        """The underlying async Anthropic client."""
+    def inner(self) -> Any:
+        """The underlying async OpenAI-compatible client."""
         return self._client
 
     def reset_discoveries(self) -> None:

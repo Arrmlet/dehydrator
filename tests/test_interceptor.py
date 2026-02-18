@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 from typing import Any
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import anthropic.types
 
+from dehydrator._adapter import AnthropicAdapter
 from dehydrator._index import ToolIndex
 from dehydrator._interceptor import send
 from dehydrator._search_tool import SEARCH_TOOL_NAME
@@ -74,6 +75,7 @@ def test_no_search_call_passes_through():
     index = ToolIndex(TOOLS, top_k=5)
     result = send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=set(),
@@ -123,6 +125,7 @@ def test_search_then_use():
 
     result = send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=discovered,
@@ -177,6 +180,7 @@ def test_mixed_calls():
 
     result = send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=discovered,
@@ -217,6 +221,7 @@ def test_max_rounds_exceeded():
 
     result = send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=set(),
@@ -245,6 +250,7 @@ def test_always_available_tools_included():
     index = ToolIndex(TOOLS, top_k=5)
     send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[always_tool],
         discovered=set(),
@@ -271,6 +277,7 @@ def test_discovered_tools_persist():
 
     send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=discovered,
@@ -308,6 +315,7 @@ def test_no_results_search():
 
     result = send(
         client=mock_client,
+        adapter=AnthropicAdapter(),
         index=index,
         always_available=[],
         discovered=set(),
