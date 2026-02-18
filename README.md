@@ -207,6 +207,41 @@ response = client.messages.create(...)
 client.reset_discoveries()
 ```
 
+## Benchmarks
+
+Benchmarked against **139 real tool definitions** from 6 popular MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion).
+
+### Token savings
+
+Sending all tools in every request is expensive. Dehydrator replaces them with a single `tool_search` tool and only injects the tools the model actually needs:
+
+| Tools | top_k=3 | top_k=5 | top_k=10 | Baseline |
+|------:|--------:|--------:|---------:|---------:|
+| 50 | 274 tokens (94%) | 349 tokens (93%) | 678 tokens (86%) | 4,864 |
+| 100 | 274 tokens (97%) | 349 tokens (96%) | 678 tokens (92%) | 8,954 |
+| 200 | 274 tokens (98%) | 349 tokens (98%) | 678 tokens (96%) | 18,159 |
+
+With 200 tools and `top_k=5`, you go from **18,159 → 349 tokens** per request — a **98% reduction**.
+
+### Search quality
+
+BM25 finds the right tools reliably across all 6 MCP servers:
+
+| Metric | k=3 | k=5 | k=10 |
+|--------|----:|----:|-----:|
+| Precision@k | 51.1% | 32.7% | 17.3% |
+| Recall@k | 88.6% | 95.3% | 98.3% |
+| **MRR** | | **95.8%** | |
+
+30/30 test queries found at least one correct tool in the top 10. The right tool is ranked #1 or #2 in almost every case.
+
+### Run the benchmarks
+
+```bash
+uv run python benchmarks/search_quality.py       # local, no API key
+uv run python benchmarks/token_savings_openai.py  # local, uses tiktoken
+```
+
 ## Limitations
 
 - **No streaming** — `stream=True` raises `NotImplementedError`. Planned for a future release.
