@@ -1,8 +1,8 @@
 # Dehydrator
 
-Client-side BM25 tool search for LLM APIs. Use thousands of tools without bloating the context window. Optionally re-rank with [Jev](https://vercel.com/ai-gateway/models/jev), a $0.042/M-token decision model, for 100% top-1 accuracy on the benchmark below.
+Client-side tool search for LLM APIs. Use thousands of tools without bloating the context window.
 
-Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively.
+Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively. Search runs on **BM25** (local, free), on **[Jev](https://vercel.com/ai-gateway/models/jev)** (a decision model that reads meaning, not keywords), or on both.
 
 ## The problem
 
@@ -10,7 +10,7 @@ LLM APIs require you to send all tool definitions in every request. With 100+ to
 
 ## How it works
 
-Dehydrator wraps your LLM client and replaces the full tool list with a single `tool_search` tool. When the model needs a tool, it searches by description. Dehydrator intercepts the call, runs BM25 locally, and re-calls the API with only the matched tools injected.
+Dehydrator wraps your LLM client and replaces the full tool list with a single `tool_search` tool. When the model needs a tool, it searches by description. Dehydrator intercepts the call, runs the search locally, and re-calls the API with only the matched tools injected.
 
 ```
 User request
@@ -26,7 +26,7 @@ User request
               │  intercepted by Dehydrator
               ▼
 ┌─────────────────────────────┐
-│  BM25 search (local)        │
+│  search (BM25 and/or Jev)   │
 │  → matches: send_email,     │
 │     send_slack_message       │
 └─────────────┬───────────────┘
@@ -53,6 +53,8 @@ Only the tools the model actually needs are ever sent. Discovered tools persist 
 ```bash
 pip install dehydrator
 ```
+
+No extra dependency is needed for Jev; it uses the standard library.
 
 ## Quick start
 
@@ -99,25 +101,115 @@ Works with any client that implements `client.chat.completions.create()`. No `op
 
 ### MCP tools
 
-Tools from MCP servers use `inputSchema` (camelCase) instead of `input_schema`. Dehydrator accepts both formats automatically:
+Tools from MCP servers use `inputSchema` (camelCase) or `input_schema`. Dehydrator accepts both, as dicts or as `mcp.types.Tool` objects:
 
 ```python
-# MCP format tools work directly
-tools = [
-    {"name": "get_weather", "description": "...", "inputSchema": {...}},
-]
-client = DehydratedClient(anthropic.Anthropic(), tools=tools)
+tools = (await session.list_tools()).tools   # list[mcp.types.Tool]
 
-# Or use mcp.types.Tool objects with ToolIndex.from_mcp()
 from dehydrator import ToolIndex
-
-tools = await session.list_tools()  # returns list[mcp.types.Tool]
 index = ToolIndex.from_mcp(tools, top_k=5)
 ```
 
+## Choosing a search mode
+
+| Mode | How to enable | Cost | Best for |
+|---|---|---|---|
+| **BM25** (default) | nothing | free, offline | Tool descriptions and user queries share vocabulary. |
+| **BM25 + Jev** | `reranker=JevReranker()` | ~$0.00002 / search | Best overall: BM25 shortlists 10, Jev picks. Keeps BM25 recall, fixes its ranking mistakes. |
+| **Jev only** | `search="jev"` | ~$0.00016 / search at 139 tools | Queries that share no words with tool descriptions: paraphrases, other languages. |
+
+```python
+# BM25 + Jev
+client = DehydratedClient(anthropic.Anthropic(), tools=tools, reranker=JevReranker())
+
+# Jev only
+client = DehydratedClient(anthropic.Anthropic(), tools=tools, search="jev")
+```
+
+Both work identically on `OpenAIDehydratedClient` and the async clients.
+
+Why not always Jev only? BM25 is a hard gate: when the query shares no tokens with any description, BM25 returns nothing and Jev is never asked. `"Покажи останні 3 коміти"` returns no tools in BM25 or hybrid mode and routes to `git_log` at probability 1.00 in Jev-only mode. On the other hand Jev concentrates probability on the winner and leaves the tail unordered, so if you inject several tools per search (`top_k` > 1) the hybrid's recall is higher. Pick by your queries; numbers are in [Benchmarks](#benchmarks).
+
+## Jev
+
+[Jev](https://vercel.com/ai-gateway/models/jev) by TypeSafe AI is a decision model, not an LLM. It does not generate text. Given a *state* (here: the user's query) and a typed *question* (here: "which of these tools should be called?", with every tool as an option), it returns a calibrated probability for each option plus a confidence score, in about 400 ms. Dehydrator calls it through Vercel AI Gateway as `typesafe-ai/jev`. Input costs $0.042 per million tokens; output is free.
+
+### Setup
+
+1. Create a Vercel AI Gateway key at [vercel.com/ai-gateway](https://vercel.com/ai-gateway). Free credits are granted after a card is verified.
+2. `export AI_GATEWAY_API_KEY=vck_...`
+3. Add `reranker=JevReranker()` or `search="jev"` to your client.
+
+### `JevReranker`
+
+Re-orders a list of candidate tools for a query. Used by the hybrid mode and by `JevIndex`; also usable on its own.
+
+```python
+from dehydrator import JevReranker
+
+rr = JevReranker(
+    api_key=None,          # default: AI_GATEWAY_API_KEY
+    min_probability=0.0,   # drop candidates Jev scores below this
+    timeout=30.0,
+    retries=3,             # on 429/5xx, exponential backoff
+)
+ranked = rr.rerank("send an email", tools)   # list[str], best first
+
+rr.last_probabilities   # {"send_email": 0.93, "send_slack_message": 0.07}
+rr.last_confidence      # 0.86  (1 = concentrated, 0 = spread out)
+rr.last_error           # None, or the exception if the last call fell back
+```
+
+If a request fails for any reason, `rerank` returns the candidates in the order it received them and sets `last_error`. In hybrid mode that means BM25 order, so enabling Jev can never make results worse than plain BM25.
+
+`min_probability` shrinks the injected tool list: with `min_probability=0.05`, tools Jev considers irrelevant are dropped even if `top_k` has room.
+
+### `JevIndex`
+
+Jev-only search. Same interface as `ToolIndex`.
+
+```python
+from dehydrator import JevIndex
+
+index = JevIndex(tools, top_k=5, batch_size=200, finalists=10)
+index.search("is my working copy dirty")     # ["git_status", ...]
+index.last_probabilities, index.last_confidence
+```
+
+Jev accepts at most 255 options per question. Above `batch_size` tools, `JevIndex` runs a tournament: each batch gets a Jev round and the top `finalists` from every batch meet in a final round. With 1,000 tools that is six requests per search. Under 200 tools it is one request.
+
+### Reading the output
+
+Use the probabilities and confidence, not just the winner:
+
+- `git_status 1.00, confidence 1.0`: route and move on.
+- `move_file 0.88, create_directory 0.12, confidence 0.86`: two steps may be needed.
+- `search_files 0.92, read_multiple_files 0.07`: the query was vague ("look at the tests"); consider asking the user.
+
+A useful pattern is to escalate to a human or a larger model when `last_confidence` is below a threshold you choose per action.
+
+### Dehydrator as an MCP gateway
+
+`examples/mcp_server.py` runs Dehydrator as an MCP server in front of any number of other MCP servers. Clients such as Claude Code see two tools, `tool_search` and `call_tool`, instead of hundreds:
+
+```bash
+export AI_GATEWAY_API_KEY=vck_...
+export DEHYDRATOR_SERVERS='{"fs":  {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/my/project"]},
+                            "git": {"command": "uvx", "args": ["mcp-server-git"]}}'
+export DEHYDRATOR_SEARCH=jev       # or bm25 (hybrid when a key is set)
+
+claude mcp add dehydrator \
+  -e AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY \
+  -e DEHYDRATOR_SERVERS="$DEHYDRATOR_SERVERS" \
+  -e DEHYDRATOR_SEARCH=$DEHYDRATOR_SEARCH \
+  -- uv run --directory /path/to/dehydrator python examples/mcp_server.py
+```
+
+`tool_search` results include each tool's argument schema and its Jev probability. `call_tool` forwards to whichever upstream server owns the tool.
+
 ## API
 
-### `DehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3)`
+### `DehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3, reranker=None, search="bm25")`
 
 Wraps an `anthropic.Anthropic` client.
 
@@ -128,6 +220,8 @@ Wraps an `anthropic.Anthropic` client.
 | `top_k` | `int` | Max tools returned per search (default: 5) |
 | `always_available` | `list[str]` | Tool names to include in every request, bypassing search |
 | `max_search_rounds` | `int` | Max search iterations per `create()` call (default: 3) |
+| `reranker` | `Reranker \| None` | Re-orders the BM25 shortlist, e.g. `JevReranker()` |
+| `search` | `"bm25" \| "jev"` | Search backend. `"jev"` uses `JevIndex` and no BM25 |
 
 #### Methods
 
@@ -139,17 +233,9 @@ Wraps an `anthropic.Anthropic` client.
 
 Same API as `DehydratedClient`, but wraps `anthropic.AsyncAnthropic` and `create()` is async.
 
-### `OpenAIDehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3)`
+### `OpenAIDehydratedClient(client, tools, *, top_k=5, always_available=None, max_search_rounds=3, reranker=None, search="bm25")`
 
-Wraps any OpenAI-compatible client.
-
-| Parameter | Type | Description |
-|---|---|---|
-| `client` | any | Any client with `client.chat.completions.create()` |
-| `tools` | `list[dict]` | Tool definitions (Anthropic or MCP format — converted to OpenAI format automatically) |
-| `top_k` | `int` | Max tools returned per search (default: 5) |
-| `always_available` | `list[str]` | Tool names to include in every request, bypassing search |
-| `max_search_rounds` | `int` | Max search iterations per `create()` call (default: 3) |
+Wraps any OpenAI-compatible client. Same parameters as `DehydratedClient`; `client` is any object with `client.chat.completions.create()`, and tools are converted to OpenAI function format automatically.
 
 #### Methods
 
@@ -161,9 +247,9 @@ Wraps any OpenAI-compatible client.
 
 Same API as `OpenAIDehydratedClient`, but `create()` is async.
 
-### `ToolIndex`
+### `ToolIndex(tools, *, top_k=5, reranker=None, candidates=10)`
 
-The BM25 index is also available standalone if you want to use it directly.
+The BM25 index, standalone. With a `reranker`, BM25 retrieves `candidates` tools, the reranker orders them, and `top_k` are returned.
 
 ```python
 from dehydrator import ToolIndex
@@ -172,44 +258,12 @@ index = ToolIndex(tools, top_k=5)
 matched_names = index.search("weather forecast")
 matched_tools = index.get_tools(matched_names)
 
-# From MCP Tool objects
-index = ToolIndex.from_mcp(mcp_tools, top_k=5)
+index = ToolIndex.from_mcp(mcp_tools, top_k=5, reranker=JevReranker())
 ```
 
-## Jev re-ranking (optional)
+### `JevIndex`, `JevReranker`, `Reranker`, `SearchIndex`
 
-BM25 is fast and free but purely lexical: "run a GitHub Actions workflow" ranks `get_workflow_run` above `run_workflow`. [Jev](https://vercel.com/ai-gateway/models/jev) from TypeSafe AI is a decision model (not an LLM) that answers a typed `choice` question with a calibrated probability per option in about 400 ms. Dehydrator can hand Jev the BM25 shortlist and let it pick:
-
-```python
-from dehydrator import DehydratedClient, JevReranker
-
-client = DehydratedClient(
-    anthropic.Anthropic(),
-    tools=tools,
-    top_k=5,
-    reranker=JevReranker(),   # reads AI_GATEWAY_API_KEY
-)
-```
-
-Works the same with `OpenAIDehydratedClient`, the async clients, and `ToolIndex(tools, reranker=JevReranker())`. BM25 retrieves `candidates` tools (default 10), Jev orders them, the best `top_k` are returned. If the Jev request fails for any reason the BM25 order is used, so the reranker can never make results worse than plain BM25.
-
-### Jev only, no BM25
-
-If you would rather not run BM25 at all, pass `search="jev"`:
-
-```python
-client = DehydratedClient(anthropic.Anthropic(), tools=tools, search="jev")
-```
-
-`JevIndex` asks Jev one `choice` question over your tools per search. Jev accepts at most 255 options per question, so above `batch_size` (default 200) tools it runs a tournament: each batch gets a Jev round and the top `finalists` of every batch meet in a final round. 1,000 tools is six requests per search. `JevIndex` is also usable standalone with the same interface as `ToolIndex`.
-
-Measured: with the default `batch_size` the 139-tool benchmark is one request per search (100% top-1, ~400 ms). Forcing the tournament with `batch_size=50` made it four sequential requests per search; under the gateway's concurrency throttling that took ~10 s per search and 5 of 120 requests fell back, which cost exactly 5 top-1 hits (25/30). Keep batches large, and expect the tournament to be a slow path until the gateway allows more parallelism.
-
-Trade-offs measured on the benchmark below: Jev-only matches the hybrid on top-1 (100%) but its recall at 10 is lower (92% vs 98%), because Jev concentrates probability on the winner and leaves the tail unordered, and each search sends every tool description (7x the tokens of the hybrid). Prefer the hybrid when you inject several tools per search; prefer Jev-only when your queries share few words with your tool descriptions.
-
-`JevReranker(min_probability=0.05)` additionally drops candidates Jev considers irrelevant, which shrinks the tool list injected into the next request. After each search `reranker.last_probabilities` and `reranker.last_confidence` hold the distribution, useful for logging or for falling back to a bigger model when confidence is low.
-
-Get a key at [vercel.com/ai-gateway](https://vercel.com/ai-gateway) (free credits after card verification). Requests go to `https://ai-gateway.vercel.sh/v1/evaluate`; no extra Python dependency is needed.
+See [Jev](#jev). `Reranker` and `SearchIndex` are protocols: implement `rerank(query, tools) -> list[str]` to plug in your own reranker, or `search / get_tools / get_tool / tool_names` to supply your own index to the adapters.
 
 ## Always-available tools
 
@@ -244,7 +298,7 @@ client.reset_discoveries()
 
 ## Benchmarks
 
-Benchmarked against **139 real tool definitions** from 6 popular MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion).
+Benchmarked against **139 real tool definitions** from 6 popular MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion) and 30 ground-truth queries.
 
 ### Token savings
 
@@ -260,45 +314,45 @@ With 200 tools and `top_k=5`, you go from **18,159 → 349 tokens** per request 
 
 ### Search quality
 
-BM25 finds the right tools reliably across all 6 MCP servers:
-
-| Metric | k=3 | k=5 | k=10 |
-|--------|----:|----:|-----:|
-| Precision@k | 51.1% | 32.7% | 17.3% |
-| Recall@k | 88.6% | 95.3% | 98.3% |
-| **MRR** | | **95.8%** | |
-
-30/30 test queries found at least one correct tool in the top 10. The right tool is ranked #1 or #2 in almost every case.
-
-### With Jev re-ranking
-
-Same 139 tools and 30 queries, BM25 shortlist of 10 re-ranked by `typesafe-ai/jev`:
-
-| Metric | BM25 | Jev over all 139 | BM25 → Jev (hybrid) |
-|--------|-----:|-----------------:|--------------------:|
-| Precision@1 | 93.3% | 100.0% | 100.0% |
+| Metric | BM25 | BM25 + Jev | Jev only |
+|--------|-----:|-----------:|---------:|
+| Precision@1 | 93.3% | **100.0%** | **100.0%** |
 | Recall@1 | 59.7% | 66.4% | 66.4% |
-| Recall@3 | 88.6% | 91.9% | 88.3% |
-| Recall@10 | 98.3% | 93.1% | 98.3% |
-| **MRR** | 95.8% | 100.0% | **100.0%** |
-| input tokens / query | 0 | 3,741 | 553 |
-| cost / query | $0 | $0.00016 | $0.00002 |
-| median latency | <1 ms | 412 ms | 386 ms |
+| Recall@3 | 88.6% | 91.9% | 91.9% |
+| Recall@5 | 95.3% | 96.1% | 91.9% |
+| Recall@10 | 98.3% | 98.3% | 91.9% |
+| **MRR** | 95.8% | **100.0%** | **100.0%** |
+| input tokens / search | 0 | 553 | 3,741 |
+| cost / search | $0 | $0.00002 | $0.00016 |
+| median latency | <1 ms | 386 ms | 412 ms |
 
-The hybrid keeps BM25's recall, gets Jev's top-1, and costs 2 thousandths of a cent per search. Mean Jev confidence was 0.86; the single query with confidence below 0.5 ("evaluate JavaScript on the page") had two equally valid tools.
+All three modes find a correct tool in the top 10 for 30/30 queries. BM25 alone misses top-1 on two lexical traps (`get_workflow_run` over `run_workflow`, `create_pull_request_review` over `create_pull_request`); both Jev modes fix them. Jev-only trades recall in the tail for independence from vocabulary.
+
+Jev-only above 200 tools uses the tournament, which is several sequential requests per search. The gateway currently throttles around 3 concurrent requests, so expect a few seconds per search on very large corpora.
 
 ### Run the benchmarks
 
 ```bash
-uv run python benchmarks/search_quality.py       # local, no API key
+uv run python benchmarks/search_quality.py       # BM25, local, no API key
 uv run python benchmarks/token_savings_openai.py  # local, uses tiktoken
-uv run python benchmarks/search_quality_jev.py    # needs AI_GATEWAY_API_KEY
+uv run python benchmarks/search_quality_jev.py    # all three modes, needs AI_GATEWAY_API_KEY
 ```
+
+## Examples
+
+| File | What it shows |
+|---|---|
+| `examples/mcp_server.py` | Dehydrator as an MCP gateway in front of other MCP servers |
+| `examples/mcp_chat.py` | Interactive chat: real MCP servers, LLM via Vercel AI Gateway, Jev search |
+| `examples/e2e_gateway.py` | Five prompts with and without Jev against the benchmark corpus |
+
+All examples need only `AI_GATEWAY_API_KEY`. Run with `uv run --with openai python examples/<file>`.
 
 ## Limitations
 
 - **No streaming** — `stream=True` raises `NotImplementedError`. Planned for a future release.
 - **Reserved tool name** — You cannot have a tool named `tool_search`. Dehydrator will raise `ValueError` if you do.
+- **Jev option cap** — one Jev question holds at most 255 tools; `JevIndex` handles more via the tournament.
 
 ## Development
 
