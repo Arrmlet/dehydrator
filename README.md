@@ -2,7 +2,7 @@
 
 Client-side tool search for LLM APIs. Use thousands of tools without bloating the context window.
 
-Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively. Search runs on **BM25** (local, free), on **[Jev](https://vercel.com/ai-gateway/models/jev)** (a decision model that reads meaning, not keywords), or on both.
+Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively. Search runs on **BM25** (local, free), on **[Jev](https://typesafe.ai)** by TypeSafe AI (a decision model that reads meaning, not keywords), or on both.
 
 ## The problem
 
@@ -132,7 +132,7 @@ Why not always Jev only? BM25 is a hard gate: when the query shares no tokens wi
 
 ## Jev
 
-[Jev](https://vercel.com/ai-gateway/models/jev) by TypeSafe AI is a decision model, not an LLM. It does not generate text. Given a *state* (here: the user's query) and a typed *question* (here: "which of these tools should be called?", with every tool as an option), it returns a calibrated probability for each option plus a confidence score, in about 400 ms. Dehydrator calls it through Vercel AI Gateway as `typesafe-ai/jev`. Input costs $0.042 per million tokens; output is free.
+[Jev](https://typesafe.ai) by [TypeSafe AI](https://typesafe.ai) is a decision model, not an LLM. It does not generate text. Given a *state* (here: the user's query) and a typed *question* (here: "which of these tools should be called?", with every tool as an option), it returns a calibrated probability for each option plus a confidence score, in about 400 ms. Dehydrator calls it through [Vercel AI Gateway](https://vercel.com/ai-gateway/models/jev) as `typesafe-ai/jev`. Input costs $0.042 per million tokens; output is free. Model docs: [docs.typesafe.ai](https://docs.typesafe.ai/).
 
 ### Setup
 

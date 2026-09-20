@@ -1,6 +1,6 @@
 # Benchmarks
 
-Jev vs BM25 for routing MCP tool calls. 139 real tool definitions from six MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion), 30 hand-labelled queries. Run on 2026-09-20 with `dehydrator` 0.3.0 and `typesafe-ai/jev` via Vercel AI Gateway.
+[Jev](https://typesafe.ai) (TypeSafe AI) vs BM25 for routing MCP tool calls. 139 real tool definitions from six MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion), 30 hand-labelled queries. Run on 2026-09-20 with `dehydrator` 0.3.0 and `typesafe-ai/jev` via Vercel AI Gateway.
 
 | | BM25 | BM25 → Jev | Jev only |
 |---|---:|---:|---:|
