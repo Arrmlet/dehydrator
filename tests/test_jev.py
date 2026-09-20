@@ -143,3 +143,100 @@ def test_http_retries_on_429(monkeypatch):
     assert r.rerank("x", [TOOLS[0], TOOLS[1]]) == ["send_email", "get_weather"]
     assert attempts["n"] == 3
     assert r.last_error is None
+
+
+# ---- JevIndex (pure Jev, no BM25) ------------------------------------------
+
+
+def _scripted(answers_by_call):
+    """Transport returning successive canned probability dicts."""
+    calls: list[dict] = []
+    it = iter(answers_by_call)
+
+    def transport(body):
+        calls.append(body)
+        probs = next(it)
+        return {
+            "answers": {
+                "tool": {
+                    "type": "choice",
+                    "choice": max(probs, key=probs.get),
+                    "probabilities": probs,
+                    "confidence": 0.8,
+                }
+            }
+        }
+
+    transport.calls = calls  # type: ignore[attr-defined]
+    return transport
+
+
+def test_jev_index_single_round():
+    from dehydrator import JevIndex
+
+    t = _scripted(
+        [
+            {
+                "get_weather": 0.05,
+                "send_email": 0.9,
+                "list_files": 0.03,
+                "create_calendar_event": 0.02,
+            }
+        ]
+    )
+    idx = JevIndex(TOOLS, top_k=2, reranker=JevReranker(transport=t))
+    assert idx.search("email my boss") == ["send_email", "get_weather"]
+    assert len(t.calls) == 1
+    assert set(t.calls[0]["questions"]["tool"]["criteria"]) == {
+        tt["name"] for tt in TOOLS
+    }
+    assert idx.last_probabilities["send_email"] == 0.9
+    assert idx.last_confidence == 0.8
+
+
+def test_jev_index_tournament_over_batch_size():
+    from dehydrator import JevIndex
+
+    # 4 tools, batch_size=2 -> two batch rounds, then a final over finalists.
+    t = _scripted(
+        [
+            {"get_weather": 0.3, "send_email": 0.7},  # batch 1
+            {"list_files": 0.9, "create_calendar_event": 0.1},  # batch 2
+            {
+                "send_email": 0.2,
+                "get_weather": 0.05,
+                "list_files": 0.7,
+                "create_calendar_event": 0.05,
+            },  # final
+        ]
+    )
+    idx = JevIndex(
+        TOOLS, top_k=1, reranker=JevReranker(transport=t), batch_size=2, finalists=2
+    )
+    assert idx.search("show me the files") == ["list_files"]
+    assert len(t.calls) == 3
+    final = set(t.calls[2]["questions"]["tool"]["criteria"])
+    assert final == {"get_weather", "send_email", "list_files", "create_calendar_event"}
+
+
+def test_jev_index_empty_query_and_validation():
+    from dehydrator import JevIndex
+
+    idx = JevIndex(TOOLS, reranker=JevReranker(transport=_scripted([])))
+    assert idx.search("   ") == []
+    with pytest.raises(ValueError, match="must not be empty"):
+        JevIndex([], reranker=JevReranker(transport=_scripted([])))
+    with pytest.raises(ValueError, match="batch_size"):
+        JevIndex(TOOLS, reranker=JevReranker(transport=_scripted([])), batch_size=300)
+
+
+def test_client_search_jev_builds_jev_index():
+    from unittest.mock import MagicMock
+
+    from dehydrator import DehydratedClient, JevIndex
+
+    rr = JevReranker(transport=_scripted([]))
+    client = DehydratedClient(MagicMock(), tools=TOOLS, search="jev", reranker=rr)
+    assert isinstance(client._index, JevIndex)
+    with pytest.raises(ValueError, match="search must be"):
+        DehydratedClient(MagicMock(), tools=TOOLS, search="nope")  # type: ignore[arg-type]

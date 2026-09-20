@@ -7,7 +7,12 @@ import urllib.error
 import urllib.request
 from typing import Any, Callable, Protocol
 
-from dehydrator._types import ToolParam, get_tool_description, get_tool_name
+from dehydrator._types import (
+    ToolParam,
+    get_tool_description,
+    get_tool_name,
+    mcp_tool_to_dict,
+)
 
 JEV_MODEL = "typesafe-ai/jev"
 GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/evaluate"
@@ -151,3 +156,80 @@ def _extract_confidence(
     meta = data.get("providerMetadata", {}).get("typesafe", {}).get("confidence", {})
     value = meta.get("tool")
     return float(value) if value is not None else None
+
+
+class JevIndex:
+    """Tool search with Jev only, no BM25.
+
+    Every search asks Jev one ``choice`` question over the tools. Jev accepts
+    at most 255 options per question, so larger corpora run a tournament:
+    tools are split into batches of ``batch_size``, each batch gets a Jev
+    round, the top ``finalists`` of every batch meet in a final round.
+    A 1,000-tool corpus is 5 batch rounds plus 1 final, about 2.5 s
+    sequentially and roughly 3 cents per 1,000 searches.
+
+    Drop-in for :class:`ToolIndex` in every client via ``search="jev"``.
+    """
+
+    def __init__(
+        self,
+        tools: list[ToolParam],
+        *,
+        top_k: int = 5,
+        reranker: JevReranker | None = None,
+        batch_size: int = 200,
+        finalists: int = 10,
+    ) -> None:
+        if not tools:
+            raise ValueError("tools must not be empty")
+        if not 2 <= batch_size <= _MAX_CHOICE_OPTIONS:
+            raise ValueError(f"batch_size must be 2..{_MAX_CHOICE_OPTIONS}")
+        self._tools_by_name: dict[str, ToolParam] = {}
+        for tool in tools:
+            name = get_tool_name(tool)
+            if name in self._tools_by_name:
+                raise ValueError(f"Duplicate tool name: {name!r}")
+            self._tools_by_name[name] = tool
+        self._tools = list(tools)
+        self._top_k = top_k
+        self._reranker = reranker or JevReranker()
+        self._batch_size = batch_size
+        self._finalists = max(finalists, top_k)
+        self.last_probabilities: dict[str, float] = {}
+        self.last_confidence: float | None = None
+
+    @classmethod
+    def from_mcp(cls, tools: list[Any], **kwargs: Any) -> JevIndex:
+        """Create a JevIndex from ``mcp.types.Tool`` objects."""
+        return cls([mcp_tool_to_dict(t) for t in tools], **kwargs)
+
+    @property
+    def tool_names(self) -> list[str]:
+        return [get_tool_name(t) for t in self._tools]
+
+    @property
+    def reranker(self) -> JevReranker:
+        return self._reranker
+
+    def search(self, query: str) -> list[str]:
+        """Return up to *top_k* tool names, best first, as ranked by Jev."""
+        if not query.strip():
+            return []
+        candidates = self._tools
+        if len(candidates) > self._batch_size:
+            finalists: list[ToolParam] = []
+            for i in range(0, len(candidates), self._batch_size):
+                batch = candidates[i : i + self._batch_size]
+                names = self._reranker.rerank(query, batch)[: self._finalists]
+                finalists.extend(self.get_tools(names))
+            candidates = finalists
+        ranked = self._reranker.rerank(query, candidates)
+        self.last_probabilities = dict(self._reranker.last_probabilities)
+        self.last_confidence = self._reranker.last_confidence
+        return ranked[: self._top_k]
+
+    def get_tools(self, names: list[str]) -> list[ToolParam]:
+        return [self._tools_by_name[n] for n in names if n in self._tools_by_name]
+
+    def get_tool(self, name: str) -> ToolParam | None:
+        return self._tools_by_name.get(name)

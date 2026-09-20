@@ -1,9 +1,22 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Protocol
 
 ToolParam = dict[str, Any]
 """A tool definition dict (Anthropic or MCP format)."""
+
+
+class SearchIndex(Protocol):
+    """What the clients need from a tool index (BM25, Jev, or your own)."""
+
+    @property
+    def tool_names(self) -> list[str]: ...
+
+    def search(self, query: str) -> list[str]: ...
+
+    def get_tools(self, names: list[str]) -> list[ToolParam]: ...
+
+    def get_tool(self, name: str) -> ToolParam | None: ...
 
 
 def get_tool_name(tool: Any) -> str:

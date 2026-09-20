@@ -193,6 +193,20 @@ client = DehydratedClient(
 
 Works the same with `OpenAIDehydratedClient`, the async clients, and `ToolIndex(tools, reranker=JevReranker())`. BM25 retrieves `candidates` tools (default 10), Jev orders them, the best `top_k` are returned. If the Jev request fails for any reason the BM25 order is used, so the reranker can never make results worse than plain BM25.
 
+### Jev only, no BM25
+
+If you would rather not run BM25 at all, pass `search="jev"`:
+
+```python
+client = DehydratedClient(anthropic.Anthropic(), tools=tools, search="jev")
+```
+
+`JevIndex` asks Jev one `choice` question over your tools per search. Jev accepts at most 255 options per question, so above `batch_size` (default 200) tools it runs a tournament: each batch gets a Jev round and the top `finalists` of every batch meet in a final round. 1,000 tools is six requests per search. `JevIndex` is also usable standalone with the same interface as `ToolIndex`.
+
+Measured: with the default `batch_size` the 139-tool benchmark is one request per search (100% top-1, ~400 ms). Forcing the tournament with `batch_size=50` made it four sequential requests per search; under the gateway's concurrency throttling that took ~10 s per search and 5 of 120 requests fell back, which cost exactly 5 top-1 hits (25/30). Keep batches large, and expect the tournament to be a slow path until the gateway allows more parallelism.
+
+Trade-offs measured on the benchmark below: Jev-only matches the hybrid on top-1 (100%) but its recall at 10 is lower (92% vs 98%), because Jev concentrates probability on the winner and leaves the tail unordered, and each search sends every tool description (7x the tokens of the hybrid). Prefer the hybrid when you inject several tools per search; prefer Jev-only when your queries share few words with your tool descriptions.
+
 `JevReranker(min_probability=0.05)` additionally drops candidates Jev considers irrelevant, which shrinks the tool list injected into the next request. After each search `reranker.last_probabilities` and `reranker.last_confidence` hold the distribution, useful for logging or for falling back to a bigger model when confidence is low.
 
 Get a key at [vercel.com/ai-gateway](https://vercel.com/ai-gateway) (free credits after card verification). Requests go to `https://ai-gateway.vercel.sh/v1/evaluate`; no extra Python dependency is needed.

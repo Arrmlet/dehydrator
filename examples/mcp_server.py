@@ -5,7 +5,8 @@ Exposes two tools to the client (e.g. Claude Code):
   call_tool(name, arguments)  proxy the call to whichever upstream server owns it
 
 Upstream servers are spawned over stdio from DEHYDRATOR_SERVERS (JSON) or the
-defaults below (filesystem + git on this repo).
+defaults below (filesystem + git on this repo). DEHYDRATOR_SEARCH=bm25 (default,
+BM25 shortlist re-ranked by Jev when a key is set) or jev (Jev only, no BM25).
 
 Register with Claude Code:
   claude mcp add dehydrator -e AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY -- \
@@ -29,7 +30,7 @@ from mcp.server.mcpserver import Context, MCPServer
 _root = str(Path(__file__).resolve().parent.parent)
 sys.path.insert(0, _root + "/src")
 
-from dehydrator import JevReranker, ToolIndex  # noqa: E402
+from dehydrator import JevIndex, JevReranker, ToolIndex  # noqa: E402
 from dehydrator._types import mcp_tool_to_dict  # noqa: E402
 
 DEFAULT_SERVERS = {
@@ -37,11 +38,12 @@ DEFAULT_SERVERS = {
     "git": {"command": "uvx", "args": ["mcp-server-git"]},
 }
 TOP_K = int(os.environ.get("DEHYDRATOR_TOP_K", "5"))
+SEARCH = os.environ.get("DEHYDRATOR_SEARCH", "bm25")  # bm25 | jev
 
 
 @dataclass
 class State:
-    index: ToolIndex
+    index: ToolIndex | JevIndex
     reranker: JevReranker | None
     sessions: dict[str, ClientSession]
     owner: dict[str, str]
@@ -74,8 +76,15 @@ async def lifespan(_: MCPServer):
             _log(f"upstream {name}: {len(listed)} tools")
         use_jev = bool(os.environ.get("AI_GATEWAY_API_KEY")) and not os.environ.get("NO_JEV")
         reranker = JevReranker() if use_jev else None
-        _log(f"{len(tools)} tools indexed; jev={'on' if reranker else 'off'}")
-        yield State(ToolIndex(tools, top_k=TOP_K, reranker=reranker), reranker, sessions, owner)
+        if SEARCH == "jev":
+            if reranker is None:
+                raise SystemExit("DEHYDRATOR_SEARCH=jev needs AI_GATEWAY_API_KEY")
+            index: ToolIndex | JevIndex = JevIndex(tools, top_k=TOP_K, reranker=reranker)
+        else:
+            index = ToolIndex(tools, top_k=TOP_K, reranker=reranker)
+        mode = SEARCH if reranker else "bm25 (no key)"
+        _log(f"{len(tools)} tools indexed; search={mode}")
+        yield State(index, reranker, sessions, owner)
 
 
 server = MCPServer(
