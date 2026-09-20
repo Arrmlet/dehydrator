@@ -31,8 +31,10 @@ def get_tool_schema(tool: Any) -> dict[str, Any]:
         if isinstance(schema, dict):
             return schema
         return {}
-    # mcp.types.Tool has .inputSchema
+    # mcp.types.Tool exposes .inputSchema (older SDKs) or .input_schema
     schema = getattr(tool, "inputSchema", None)
+    if schema is None:
+        schema = getattr(tool, "input_schema", None)
     if schema is None:
         return {}
     if isinstance(schema, dict):
