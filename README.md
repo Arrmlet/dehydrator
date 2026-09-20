@@ -190,22 +190,82 @@ A useful pattern is to escalate to a human or a larger model when `last_confiden
 
 ### Dehydrator as an MCP gateway
 
-`examples/mcp_server.py` runs Dehydrator as an MCP server in front of any number of other MCP servers. Clients such as Claude Code see two tools, `tool_search` and `call_tool`, instead of hundreds:
+`dehydrator-mcp` (installed with the package) runs Dehydrator as an MCP server in front of any number of other MCP servers. Your coding agent sees two tools, `tool_search` and `call_tool`, instead of hundreds, and every search is ranked by Jev.
+
+Configuration is by environment variables:
+
+| Variable | Meaning |
+|---|---|
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key. Without it, search is plain BM25. |
+| `DEHYDRATOR_SERVERS` | JSON map of upstream servers: `{"name": {"command": "...", "args": [...], "env": {...}}}`. Default: filesystem + git on the current directory. |
+| `DEHYDRATOR_SEARCH` | `jev` (Jev only) or `bm25` (default; BM25 shortlist re-ranked by Jev when a key is set). |
+| `DEHYDRATOR_TOP_K` | Tools returned per search. Default 5. |
+
+Example upstream set, used in the snippets below:
 
 ```bash
-export AI_GATEWAY_API_KEY=vck_...
-export DEHYDRATOR_SERVERS='{"fs":  {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/my/project"]},
-                            "git": {"command": "uvx", "args": ["mcp-server-git"]}}'
-export DEHYDRATOR_SEARCH=jev       # or bm25 (hybrid when a key is set)
+export DEHYDRATOR_SERVERS='{
+  "fs":     {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/my/project"]},
+  "git":    {"command": "uvx", "args": ["mcp-server-git"]},
+  "github": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-github"],
+             "env": {"GITHUB_PERSONAL_ACCESS_TOKEN": "ghp_..."}}
+}'
+```
 
+#### Claude Code
+
+```bash
 claude mcp add dehydrator \
   -e AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY \
   -e DEHYDRATOR_SERVERS="$DEHYDRATOR_SERVERS" \
-  -e DEHYDRATOR_SEARCH=$DEHYDRATOR_SEARCH \
-  -- uv run --directory /path/to/dehydrator python examples/mcp_server.py
+  -e DEHYDRATOR_SEARCH=jev \
+  -- uvx --from dehydrator dehydrator-mcp
 ```
 
-`tool_search` results include each tool's argument schema and its Jev probability. `call_tool` forwards to whichever upstream server owns the tool.
+Then `/mcp` shows `dehydrator` with two tools. Add `-s user` to make it available in every project.
+
+#### OpenAI Codex CLI
+
+`~/.codex/config.toml`:
+
+```toml
+[mcp_servers.dehydrator]
+command = "uvx"
+args = ["--from", "dehydrator", "dehydrator-mcp"]
+
+[mcp_servers.dehydrator.env]
+AI_GATEWAY_API_KEY = "vck_..."
+DEHYDRATOR_SEARCH = "jev"
+DEHYDRATOR_SERVERS = '{"fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/my/project"]}}'
+```
+
+#### Cursor
+
+`.cursor/mcp.json` in the project (or `~/.cursor/mcp.json` globally):
+
+```json
+{
+  "mcpServers": {
+    "dehydrator": {
+      "command": "uvx",
+      "args": ["--from", "dehydrator", "dehydrator-mcp"],
+      "env": {
+        "AI_GATEWAY_API_KEY": "vck_...",
+        "DEHYDRATOR_SEARCH": "jev",
+        "DEHYDRATOR_SERVERS": "{\"fs\": {\"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/my/project\"]}}"
+      }
+    }
+  }
+}
+```
+
+#### Claude Desktop
+
+Same JSON shape as Cursor, in `claude_desktop_config.json` (macOS: `~/Library/Application Support/Claude/`, Windows: `%APPDATA%\Claude\`).
+
+#### Any other MCP client
+
+Anything that can launch a stdio MCP server works: run `dehydrator-mcp` with the environment above. `pipx run --spec dehydrator dehydrator-mcp` is an alternative to `uvx`. `tool_search` results include each tool's argument schema and Jev probability; `call_tool` forwards to whichever upstream server owns the tool.
 
 ## API
 
@@ -342,11 +402,10 @@ uv run python benchmarks/search_quality_jev.py    # all three modes, needs AI_GA
 
 | File | What it shows |
 |---|---|
-| `examples/mcp_server.py` | Dehydrator as an MCP gateway in front of other MCP servers |
 | `examples/mcp_chat.py` | Interactive chat: real MCP servers, LLM via Vercel AI Gateway, Jev search |
 | `examples/e2e_gateway.py` | Five prompts with and without Jev against the benchmark corpus |
 
-All examples need only `AI_GATEWAY_API_KEY`. Run with `uv run --with openai python examples/<file>`.
+All examples need only `AI_GATEWAY_API_KEY`. Run with `uv run --with openai python examples/<file>`. The MCP gateway is not an example but part of the package: see [Dehydrator as an MCP gateway](#dehydrator-as-an-mcp-gateway).
 
 ## Limitations
 

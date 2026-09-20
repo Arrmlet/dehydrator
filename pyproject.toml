@@ -14,6 +14,9 @@ dependencies = [
     "rank-bm25>=0.2.2",
 ]
 
+[project.scripts]
+dehydrator-mcp = "dehydrator.mcp_server:main"
+
 [project.urls]
 Homepage = "https://github.com/arrmlet/dehydrator"
 

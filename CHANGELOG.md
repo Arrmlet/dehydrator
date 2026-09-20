@@ -6,7 +6,7 @@
 - **Jev search.** `JevReranker` re-orders the BM25 shortlist with TypeSafe AI's Jev via Vercel AI Gateway (`reranker=JevReranker()`). `JevIndex` replaces BM25 entirely (`search="jev"`), with a tournament for corpora above Jev's 255-option limit. On the 139-tool benchmark both modes reach 100% Precision@1 and MRR, up from 93.3% and 95.8% with BM25 alone. Standard library only, no new dependency.
 - `Reranker` and `SearchIndex` protocols so custom rankers and indexes can be plugged into the clients.
 - `ToolIndex(reranker=, candidates=)`.
-- `examples/mcp_server.py`: Dehydrator as an MCP gateway in front of other MCP servers, for clients such as Claude Code.
+- `dehydrator-mcp` console script: Dehydrator as an MCP gateway in front of other MCP servers, for Claude Code, Codex, Cursor, Claude Desktop, or any MCP client. Configured with `DEHYDRATOR_SERVERS`, `DEHYDRATOR_SEARCH`, `DEHYDRATOR_TOP_K`.
 - `examples/mcp_chat.py`, `examples/e2e_gateway.py`: live end-to-end examples.
 - `benchmarks/search_quality_jev.py`: compares BM25, hybrid, and Jev-only.
 
