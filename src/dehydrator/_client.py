@@ -7,6 +7,7 @@ import anthropic
 from dehydrator._adapter import AnthropicAdapter
 from dehydrator._index import ToolIndex
 from dehydrator._interceptor import async_send, send
+from dehydrator._jev import Reranker
 from dehydrator._search_tool import SEARCH_TOOL_NAME
 from dehydrator._types import ToolParam, get_tool_name
 
@@ -95,6 +96,7 @@ class DehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
     ) -> None:
         self._validate_tool_names(tools)
         self._client = client
@@ -103,7 +105,7 @@ class DehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index = ToolIndex(all_tools, top_k=top_k, reranker=reranker)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.messages = _Messages(self)
@@ -155,6 +157,7 @@ class AsyncDehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
     ) -> None:
         DehydratedClient._validate_tool_names(tools)
         self._client = client
@@ -163,7 +166,7 @@ class AsyncDehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index = ToolIndex(all_tools, top_k=top_k, reranker=reranker)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.messages = _AsyncMessages(self)

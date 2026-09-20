@@ -1,7 +1,7 @@
 [project]
 name = "dehydrator"
-version = "0.2.0"
-description = "Client-side BM25 tool search for LLM APIs — Anthropic, OpenAI-compatible, and MCP"
+version = "0.3.0"
+description = "Client-side BM25 tool search for LLM APIs — Anthropic, OpenAI-compatible, MCP — with optional Jev re-ranking"
 readme = "README.md"
 license = "MIT"
 authors = [

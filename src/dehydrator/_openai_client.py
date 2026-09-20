@@ -5,6 +5,7 @@ from typing import Any
 from dehydrator._adapter import OpenAIAdapter
 from dehydrator._index import ToolIndex
 from dehydrator._interceptor import async_send, send
+from dehydrator._jev import Reranker
 from dehydrator._search_tool import SEARCH_TOOL_NAME
 from dehydrator._types import ToolParam, get_tool_name
 
@@ -92,6 +93,7 @@ class OpenAIDehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
     ) -> None:
         self._validate_tool_names(tools)
         self._client = client
@@ -100,7 +102,7 @@ class OpenAIDehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index = ToolIndex(all_tools, top_k=top_k, reranker=reranker)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.chat = _Chat(_ChatCompletions(self))
@@ -152,6 +154,7 @@ class AsyncOpenAIDehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
     ) -> None:
         OpenAIDehydratedClient._validate_tool_names(tools)
         self._client = client
@@ -160,7 +163,7 @@ class AsyncOpenAIDehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index = ToolIndex(all_tools, top_k=top_k, reranker=reranker)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.chat = _Chat(_AsyncChatCompletions(self))

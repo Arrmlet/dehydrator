@@ -1,6 +1,6 @@
 # Dehydrator
 
-Client-side BM25 tool search for LLM APIs. Use thousands of tools without bloating the context window.
+Client-side BM25 tool search for LLM APIs. Use thousands of tools without bloating the context window. Optionally re-rank with [Jev](https://vercel.com/ai-gateway/models/jev), a $0.042/M-token decision model, for 100% top-1 accuracy on the benchmark below.
 
 Works with **Anthropic**, **OpenAI**, and any **OpenAI-compatible** provider (Groq, OpenRouter, Chutes, etc.). Accepts tools from **MCP servers** natively.
 
@@ -176,6 +176,27 @@ matched_tools = index.get_tools(matched_names)
 index = ToolIndex.from_mcp(mcp_tools, top_k=5)
 ```
 
+## Jev re-ranking (optional)
+
+BM25 is fast and free but purely lexical: "run a GitHub Actions workflow" ranks `get_workflow_run` above `run_workflow`. [Jev](https://vercel.com/ai-gateway/models/jev) from TypeSafe AI is a decision model (not an LLM) that answers a typed `choice` question with a calibrated probability per option in about 400 ms. Dehydrator can hand Jev the BM25 shortlist and let it pick:
+
+```python
+from dehydrator import DehydratedClient, JevReranker
+
+client = DehydratedClient(
+    anthropic.Anthropic(),
+    tools=tools,
+    top_k=5,
+    reranker=JevReranker(),   # reads AI_GATEWAY_API_KEY
+)
+```
+
+Works the same with `OpenAIDehydratedClient`, the async clients, and `ToolIndex(tools, reranker=JevReranker())`. BM25 retrieves `candidates` tools (default 10), Jev orders them, the best `top_k` are returned. If the Jev request fails for any reason the BM25 order is used, so the reranker can never make results worse than plain BM25.
+
+`JevReranker(min_probability=0.05)` additionally drops candidates Jev considers irrelevant, which shrinks the tool list injected into the next request. After each search `reranker.last_probabilities` and `reranker.last_confidence` hold the distribution, useful for logging or for falling back to a bigger model when confidence is low.
+
+Get a key at [vercel.com/ai-gateway](https://vercel.com/ai-gateway) (free credits after card verification). Requests go to `https://ai-gateway.vercel.sh/v1/evaluate`; no extra Python dependency is needed.
+
 ## Always-available tools
 
 Some tools should always be in context (e.g. a `help` tool). Pass their names to `always_available`:
@@ -235,11 +256,29 @@ BM25 finds the right tools reliably across all 6 MCP servers:
 
 30/30 test queries found at least one correct tool in the top 10. The right tool is ranked #1 or #2 in almost every case.
 
+### With Jev re-ranking
+
+Same 139 tools and 30 queries, BM25 shortlist of 10 re-ranked by `typesafe-ai/jev`:
+
+| Metric | BM25 | Jev over all 139 | BM25 → Jev (hybrid) |
+|--------|-----:|-----------------:|--------------------:|
+| Precision@1 | 93.3% | 100.0% | 100.0% |
+| Recall@1 | 59.7% | 66.4% | 66.4% |
+| Recall@3 | 88.6% | 91.9% | 88.3% |
+| Recall@10 | 98.3% | 93.1% | 98.3% |
+| **MRR** | 95.8% | 100.0% | **100.0%** |
+| input tokens / query | 0 | 3,741 | 553 |
+| cost / query | $0 | $0.00016 | $0.00002 |
+| median latency | <1 ms | 412 ms | 386 ms |
+
+The hybrid keeps BM25's recall, gets Jev's top-1, and costs 2 thousandths of a cent per search. Mean Jev confidence was 0.86; the single query with confidence below 0.5 ("evaluate JavaScript on the page") had two equally valid tools.
+
 ### Run the benchmarks
 
 ```bash
 uv run python benchmarks/search_quality.py       # local, no API key
 uv run python benchmarks/token_savings_openai.py  # local, uses tiktoken
+uv run python benchmarks/search_quality_jev.py    # needs AI_GATEWAY_API_KEY
 ```
 
 ## Limitations
