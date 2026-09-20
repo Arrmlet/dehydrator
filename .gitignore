@@ -12,3 +12,6 @@ wheels/
 # Lock file (library — let consumers resolve deps)
 uv.lock
 .python-version
+
+# Editor / agent local config
+.claude/

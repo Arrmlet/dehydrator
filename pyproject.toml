@@ -20,6 +20,9 @@ dehydrator-mcp = "dehydrator.mcp_server:main"
 [project.urls]
 Homepage = "https://github.com/arrmlet/dehydrator"
 
+[tool.hatch.build.targets.sdist]
+exclude = [".claude/", ".github/", "dist/"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
