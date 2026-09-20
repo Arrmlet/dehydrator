@@ -132,13 +132,21 @@ Why not always Jev only? BM25 is a hard gate: when the query shares no tokens wi
 
 ## Jev
 
-[Jev](https://typesafe.ai) by [TypeSafe AI](https://typesafe.ai) is a decision model, not an LLM. It does not generate text. Given a *state* (here: the user's query) and a typed *question* (here: "which of these tools should be called?", with every tool as an option), it returns a calibrated probability for each option plus a confidence score, in about 400 ms. Dehydrator calls it through [Vercel AI Gateway](https://vercel.com/ai-gateway/models/jev) as `typesafe-ai/jev`. Input costs $0.042 per million tokens; output is free. Model docs: [docs.typesafe.ai](https://docs.typesafe.ai/).
+[Jev](https://typesafe.ai) by [TypeSafe AI](https://typesafe.ai) is a decision model, not an LLM. It does not generate text. Given a *state* (here: the user's query) and a typed *question* (here: "which of these tools should be called?", with every tool as an option), it returns a calibrated probability for each option plus a confidence score, in about 400 ms. Dehydrator calls it directly at TypeSafe's API as `jev-latest`, or through [Vercel AI Gateway](https://vercel.com/ai-gateway/models/jev) as `typesafe-ai/jev`. Input costs $0.042 per million tokens; output is free. Model docs: [docs.typesafe.ai](https://docs.typesafe.ai/).
 
 ### Setup
 
-1. Create a Vercel AI Gateway key at [vercel.com/ai-gateway](https://vercel.com/ai-gateway). Free credits are granted after a card is verified.
-2. `export AI_GATEWAY_API_KEY=vck_...`
-3. Add `reranker=JevReranker()` or `search="jev"` to your client.
+Jev is reachable two ways. Dehydrator speaks to both with the same code and picks the provider from the environment.
+
+| Provider | Key | Endpoint | Model |
+|---|---|---|---|
+| **TypeSafe AI** (default) | `TYPESAFE_API_KEY` from [console.typesafe.ai](https://console.typesafe.ai) | `api.typesafe.ai/v1/systemone` | `jev-latest` |
+| Vercel AI Gateway | `AI_GATEWAY_API_KEY` from [vercel.com/ai-gateway](https://vercel.com/ai-gateway) | `ai-gateway.vercel.sh/v1/evaluate` | `typesafe-ai/jev` |
+
+1. `export TYPESAFE_API_KEY=apikey_...` (or `AI_GATEWAY_API_KEY=vck_...`).
+2. Add `reranker=JevReranker()` or `search="jev"` to your client.
+
+If both keys are set, TypeSafe is used. Force one with `JevReranker(provider="gateway")`. On the benchmark both return identical rankings; TypeSafe's API accepted 8 concurrent requests without throttling where the gateway returned 429 above about 3.
 
 ### `JevReranker`
 
@@ -148,10 +156,12 @@ Re-orders a list of candidate tools for a query. Used by the hybrid mode and by 
 from dehydrator import JevReranker
 
 rr = JevReranker(
-    api_key=None,          # default: AI_GATEWAY_API_KEY
+    api_key=None,          # default: TYPESAFE_API_KEY, else AI_GATEWAY_API_KEY
+    provider=None,         # "typesafe" | "gateway"; auto-detected from env
+    model=None,            # provider default: jev-latest / typesafe-ai/jev
     min_probability=0.0,   # drop candidates Jev scores below this
     timeout=30.0,
-    retries=3,             # on 429/5xx, exponential backoff
+    retries=3,             # on 429/529/5xx, exponential backoff
 )
 ranked = rr.rerank("send an email", tools)   # list[str], best first
 
@@ -196,7 +206,8 @@ Configuration is by environment variables:
 
 | Variable | Meaning |
 |---|---|
-| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key. Without it, search is plain BM25. |
+| `TYPESAFE_API_KEY` | TypeSafe AI key (preferred). |
+| `AI_GATEWAY_API_KEY` | Vercel AI Gateway key, used when no TypeSafe key is set. Without either, search is plain BM25. |
 | `DEHYDRATOR_SERVERS` | JSON map of upstream servers: `{"name": {"command": "...", "args": [...], "env": {...}}}`. Default: filesystem + git on the current directory. |
 | `DEHYDRATOR_SEARCH` | `jev` (Jev only) or `bm25` (default; BM25 shortlist re-ranked by Jev when a key is set). |
 | `DEHYDRATOR_TOP_K` | Tools returned per search. Default 5. |
@@ -216,7 +227,7 @@ export DEHYDRATOR_SERVERS='{
 
 ```bash
 claude mcp add dehydrator \
-  -e AI_GATEWAY_API_KEY=$AI_GATEWAY_API_KEY \
+  -e TYPESAFE_API_KEY=$TYPESAFE_API_KEY \
   -e DEHYDRATOR_SERVERS="$DEHYDRATOR_SERVERS" \
   -e DEHYDRATOR_SEARCH=jev \
   -- uvx --from dehydrator dehydrator-mcp
@@ -234,7 +245,7 @@ command = "uvx"
 args = ["--from", "dehydrator", "dehydrator-mcp"]
 
 [mcp_servers.dehydrator.env]
-AI_GATEWAY_API_KEY = "vck_..."
+TYPESAFE_API_KEY = "apikey_..."
 DEHYDRATOR_SEARCH = "jev"
 DEHYDRATOR_SERVERS = '{"fs": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "/my/project"]}}'
 ```
@@ -250,7 +261,7 @@ DEHYDRATOR_SERVERS = '{"fs": {"command": "npx", "args": ["-y", "@modelcontextpro
       "command": "uvx",
       "args": ["--from", "dehydrator", "dehydrator-mcp"],
       "env": {
-        "AI_GATEWAY_API_KEY": "vck_...",
+        "TYPESAFE_API_KEY": "apikey_...",
         "DEHYDRATOR_SEARCH": "jev",
         "DEHYDRATOR_SERVERS": "{\"fs\": {\"command\": \"npx\", \"args\": [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/my/project\"]}}"
       }
@@ -390,14 +401,14 @@ With 200 tools and `top_k=5`, you go from **18,159 → 349 tokens** per request 
 
 All three modes find a correct tool in the top 10 for 30/30 queries. BM25 alone misses top-1 on two lexical traps (`get_workflow_run` over `run_workflow`, `create_pull_request_review` over `create_pull_request`); both Jev modes fix them. Jev-only trades recall in the tail for independence from vocabulary.
 
-Jev-only above 200 tools uses the tournament, which is several sequential requests per search. The gateway currently throttles around 3 concurrent requests, so expect a few seconds per search on very large corpora.
+Jev-only above 200 tools uses the tournament, several sequential requests per search. See [BENCHMARKS.md](BENCHMARKS.md) for timings on both providers.
 
 ### Run the benchmarks
 
 ```bash
 uv run python benchmarks/search_quality.py       # BM25, local, no API key
 uv run python benchmarks/token_savings_openai.py  # local, uses tiktoken
-uv run python benchmarks/search_quality_jev.py    # all three modes, needs AI_GATEWAY_API_KEY
+uv run python benchmarks/search_quality_jev.py    # all three modes, needs TYPESAFE_API_KEY or AI_GATEWAY_API_KEY
 ```
 
 ## Examples
@@ -407,7 +418,7 @@ uv run python benchmarks/search_quality_jev.py    # all three modes, needs AI_GA
 | `examples/mcp_chat.py` | Interactive chat: real MCP servers, LLM via Vercel AI Gateway, Jev search |
 | `examples/e2e_gateway.py` | Five prompts with and without Jev against the benchmark corpus |
 
-All examples need only `AI_GATEWAY_API_KEY`. Run with `uv run --with openai python examples/<file>`. The MCP gateway is not an example but part of the package: see [Dehydrator as an MCP gateway](#dehydrator-as-an-mcp-gateway).
+The MCP examples use `TYPESAFE_API_KEY` or `AI_GATEWAY_API_KEY` for Jev, and `AI_GATEWAY_API_KEY` for the LLM they drive. Run with `uv run --with openai python examples/<file>`. The MCP gateway is not an example but part of the package: see [Dehydrator as an MCP gateway](#dehydrator-as-an-mcp-gateway).
 
 ## Limitations
 

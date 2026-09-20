@@ -13,7 +13,8 @@ Configuration is by environment variables:
   DEHYDRATOR_SEARCH    bm25 (default; BM25 shortlist re-ranked by Jev when a
                        key is set) or jev (Jev only, no BM25).
   DEHYDRATOR_TOP_K     tools returned per search (default 5).
-  AI_GATEWAY_API_KEY   Vercel AI Gateway key; without it search is plain BM25.
+  TYPESAFE_API_KEY     TypeSafe API key (preferred), or
+  AI_GATEWAY_API_KEY   Vercel AI Gateway key. Without either, search is plain BM25.
 """
 
 from __future__ import annotations
@@ -94,13 +95,15 @@ async def lifespan(_: MCPServer[State]) -> AsyncIterator[State]:
         reranker = JevReranker() if use_jev else None
         if SEARCH == "jev":
             if reranker is None:
-                raise SystemExit("DEHYDRATOR_SEARCH=jev needs AI_GATEWAY_API_KEY")
+                raise SystemExit(
+                    "DEHYDRATOR_SEARCH=jev needs TYPESAFE_API_KEY or AI_GATEWAY_API_KEY"
+                )
             index: ToolIndex | JevIndex = JevIndex(
                 tools, top_k=TOP_K, reranker=reranker
             )
         else:
             index = ToolIndex(tools, top_k=TOP_K, reranker=reranker)
-        mode = SEARCH if reranker else "bm25 (no key)"
+        mode = f"{SEARCH} via {reranker.provider}" if reranker else "bm25 (no key)"
         _log(f"{len(tools)} tools indexed; search={mode}")
         yield State(index, reranker, sessions, owner)
 

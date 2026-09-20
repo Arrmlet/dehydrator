@@ -8,9 +8,8 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from dehydrator import OpenAIDehydratedClient, AsyncOpenAIDehydratedClient
+from dehydrator import AsyncOpenAIDehydratedClient, OpenAIDehydratedClient
 from dehydrator._search_tool import SEARCH_TOOL_NAME
-
 
 TOOLS = [
     {

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.1
+
+### Added
+- **TypeSafe AI as a provider.** `JevReranker` and `JevIndex` call `api.typesafe.ai/v1/systemone` with model `jev-latest` when `TYPESAFE_API_KEY` is set, and fall back to Vercel AI Gateway with `AI_GATEWAY_API_KEY`. `JevReranker(provider="typesafe" | "gateway")` forces one; `detect_provider()` exposes the choice. The MCP gateway accepts either key.
+- `BENCHMARKS.md` with results on both providers.
+
+### Changed
+- Retries now also cover 408 and TypeSafe's 529 (overloaded).
+
 ## 0.3.0
 
 ### Added

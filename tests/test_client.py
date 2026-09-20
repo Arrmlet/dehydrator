@@ -9,7 +9,6 @@ import pytest
 from dehydrator import AsyncDehydratedClient, DehydratedClient
 from dehydrator._search_tool import SEARCH_TOOL_NAME
 
-
 TOOLS = [
     {
         "name": "get_weather",

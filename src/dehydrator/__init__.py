@@ -5,7 +5,7 @@ Optionally re-ranks the shortlist with Jev (TypeSafe AI).
 
 from dehydrator._client import AsyncDehydratedClient, DehydratedClient
 from dehydrator._index import ToolIndex
-from dehydrator._jev import JevIndex, JevReranker, Reranker
+from dehydrator._jev import JevIndex, JevReranker, Reranker, detect_provider
 from dehydrator._openai_client import (
     AsyncOpenAIDehydratedClient,
     OpenAIDehydratedClient,
@@ -21,5 +21,6 @@ __all__ = [
     "OpenAIDehydratedClient",
     "Reranker",
     "SearchIndex",
+    "detect_provider",
     "ToolIndex",
 ]

@@ -10,7 +10,6 @@ from dehydrator._index import ToolIndex
 from dehydrator._interceptor import send
 from dehydrator._search_tool import SEARCH_TOOL_NAME
 
-
 TOOLS = [
     {
         "name": "get_weather",

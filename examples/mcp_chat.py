@@ -41,7 +41,7 @@ SERVERS: dict[str, StdioServerParameters] = {
     ),
     "git": StdioServerParameters(command="uvx", args=["mcp-server-git"]),
 }
-KEY = os.environ["AI_GATEWAY_API_KEY"]
+KEY = os.environ["AI_GATEWAY_API_KEY"]  # for the LLM; Jev uses TYPESAFE_API_KEY if set
 LLM = os.environ.get("LLM_MODEL", "google/gemini-2.5-flash")
 SYSTEM = (
     f"You are a coding assistant working in the git repository at {REPO}. "

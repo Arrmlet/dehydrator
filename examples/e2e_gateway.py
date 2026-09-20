@@ -24,7 +24,7 @@ sys.path.insert(0, _root)
 from benchmarks._tools import BASE_TOOLS  # noqa: E402
 from dehydrator import JevReranker, OpenAIDehydratedClient  # noqa: E402
 
-KEY = os.environ["AI_GATEWAY_API_KEY"]
+KEY = os.environ["AI_GATEWAY_API_KEY"]  # for the LLM; Jev uses TYPESAFE_API_KEY if set
 LLM = os.environ.get("LLM_MODEL", "google/gemini-2.5-flash")
 
 PROMPTS = [
