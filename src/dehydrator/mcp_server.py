@@ -32,7 +32,7 @@ from mcp.client.stdio import stdio_client
 from mcp.server.mcpserver import Context, MCPServer
 
 from dehydrator._index import ToolIndex
-from dehydrator._jev import JevIndex, JevReranker
+from dehydrator._jev import JevIndex, JevReranker, detect_provider
 from dehydrator._types import mcp_tool_to_dict
 
 _cwd = str(Path.cwd())
