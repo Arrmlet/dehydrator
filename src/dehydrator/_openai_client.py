@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from dehydrator._adapter import OpenAIAdapter
-from dehydrator._index import ToolIndex
+from dehydrator._client import _build_index
 from dehydrator._interceptor import async_send, send
+from dehydrator._jev import Reranker
 from dehydrator._search_tool import SEARCH_TOOL_NAME
-from dehydrator._types import ToolParam, get_tool_name
+from dehydrator._types import SearchIndex, ToolParam, get_tool_name
 
 
 class _ChatCompletions:
@@ -92,6 +93,8 @@ class OpenAIDehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
+        search: Literal["bm25", "jev"] = "bm25",
     ) -> None:
         self._validate_tool_names(tools)
         self._client = client
@@ -100,7 +103,7 @@ class OpenAIDehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index: SearchIndex = _build_index(all_tools, top_k, reranker, search)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.chat = _Chat(_ChatCompletions(self))
@@ -152,6 +155,8 @@ class AsyncOpenAIDehydratedClient:
         top_k: int = 5,
         always_available: list[str] | None = None,
         max_search_rounds: int = 3,
+        reranker: Reranker | None = None,
+        search: Literal["bm25", "jev"] = "bm25",
     ) -> None:
         OpenAIDehydratedClient._validate_tool_names(tools)
         self._client = client
@@ -160,7 +165,7 @@ class AsyncOpenAIDehydratedClient:
         )
         if not all_tools:
             raise ValueError("No searchable tools provided.")
-        self._index = ToolIndex(all_tools, top_k=top_k)
+        self._index: SearchIndex = _build_index(all_tools, top_k, reranker, search)
         self._discovered: set[str] = set()
         self._max_search_rounds = max_search_rounds
         self.chat = _Chat(_AsyncChatCompletions(self))

@@ -3,14 +3,13 @@ from __future__ import annotations
 from typing import Any
 
 from dehydrator._adapter import ProviderAdapter
-from dehydrator._index import ToolIndex
-from dehydrator._types import ToolParam
+from dehydrator._types import SearchIndex, ToolParam
 
 
 def send(
     client: Any,
     adapter: ProviderAdapter,
-    index: ToolIndex,
+    index: SearchIndex,
     always_available: list[ToolParam],
     discovered: set[str],
     max_search_rounds: int,
@@ -44,7 +43,7 @@ def send(
 async def async_send(
     client: Any,
     adapter: ProviderAdapter,
-    index: ToolIndex,
+    index: SearchIndex,
     always_available: list[ToolParam],
     discovered: set[str],
     max_search_rounds: int,

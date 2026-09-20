@@ -112,3 +112,23 @@ def test_get_schema_prefers_camel_case():
 def test_get_schema_missing_returns_empty():
     tool = {"name": "t", "description": ""}
     assert get_tool_schema(tool) == {}
+
+
+def test_from_mcp_snake_case_input_schema():
+    """Newer mcp SDKs expose Tool.input_schema instead of Tool.inputSchema."""
+    from types import SimpleNamespace
+
+    from dehydrator import ToolIndex
+
+    tool = SimpleNamespace(
+        name="git_log",
+        description="Show commit logs",
+        input_schema={
+            "type": "object",
+            "properties": {"repo_path": {"type": "string"}},
+        },
+    )
+    index = ToolIndex.from_mcp([tool])
+    assert index.get_tool("git_log")["input_schema"]["properties"] == {
+        "repo_path": {"type": "string"}
+    }

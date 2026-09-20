@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any, Protocol
 
-from dehydrator._index import ToolIndex
 from dehydrator._search_tool import SEARCH_TOOL_DEFINITION, SEARCH_TOOL_NAME
 from dehydrator._types import (
+    SearchIndex,
     ToolParam,
     get_tool_description,
     get_tool_name,
@@ -30,7 +30,7 @@ class ProviderAdapter(Protocol):
 
     def build_tools(
         self,
-        index: ToolIndex,
+        index: SearchIndex,
         always_available: list[ToolParam],
         discovered: set[str],
     ) -> list[ToolParam]: ...
@@ -42,7 +42,7 @@ class ProviderAdapter(Protocol):
     def process_search_calls(
         self,
         response: Any,
-        index: ToolIndex,
+        index: SearchIndex,
         discovered: set[str],
     ) -> list[dict[str, Any]]: ...
 
@@ -63,7 +63,7 @@ class AnthropicAdapter:
 
     def build_tools(
         self,
-        index: ToolIndex,
+        index: SearchIndex,
         always_available: list[ToolParam],
         discovered: set[str],
     ) -> list[ToolParam]:
@@ -87,7 +87,7 @@ class AnthropicAdapter:
     def process_search_calls(
         self,
         response: Any,
-        index: ToolIndex,
+        index: SearchIndex,
         discovered: set[str],
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
@@ -185,7 +185,7 @@ class OpenAIAdapter:
 
     def build_tools(
         self,
-        index: ToolIndex,
+        index: SearchIndex,
         always_available: list[ToolParam],
         discovered: set[str],
     ) -> list[ToolParam]:
@@ -205,7 +205,7 @@ class OpenAIAdapter:
     def process_search_calls(
         self,
         response: Any,
-        index: ToolIndex,
+        index: SearchIndex,
         discovered: set[str],
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
