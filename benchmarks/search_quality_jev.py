@@ -1,6 +1,7 @@
 """BM25 vs Jev vs BM25+Jev hybrid on the same 30 ground-truth queries.
 
-Needs AI_GATEWAY_API_KEY (Vercel AI Gateway). ~60 Jev requests, well under a cent.
+Needs TYPESAFE_API_KEY (TypeSafe AI) or AI_GATEWAY_API_KEY (Vercel AI Gateway).
+~60 Jev requests, well under a cent. Prints which provider was used.
 
 Usage:
     uv run python benchmarks/search_quality_jev.py
@@ -51,7 +52,8 @@ def main() -> None:
             fallbacks += 1
             print(f"  fallback (hybrid)    {query!r}: {hybrid_rr.last_error}")
 
-    print(f"Corpus : {len(BASE_TOOLS)} tools   Queries: {len(GROUND_TRUTH)}\n")
+    print(f"Corpus : {len(BASE_TOOLS)} tools   Queries: {len(GROUND_TRUTH)}")
+    print(f"Provider: {full.provider}\n")
     head = f"  {'Metric':<14}" + "".join(f"{n:>18}" for n in results)
     print(head)
     print("  " + "-" * (len(head) - 2))

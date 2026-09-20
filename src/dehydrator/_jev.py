@@ -5,7 +5,7 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import Any, Callable, Protocol
+from typing import Any, Callable, Literal, Protocol
 
 from dehydrator._types import (
     ToolParam,
@@ -14,9 +14,29 @@ from dehydrator._types import (
     mcp_tool_to_dict,
 )
 
-JEV_MODEL = "typesafe-ai/jev"
+Provider = Literal["typesafe", "gateway"]
+
+TYPESAFE_URL = "https://api.typesafe.ai/v1/systemone"
+TYPESAFE_MODEL = "jev-latest"
 GATEWAY_URL = "https://ai-gateway.vercel.sh/v1/evaluate"
+GATEWAY_MODEL = "typesafe-ai/jev"
+JEV_MODEL = GATEWAY_MODEL  # backwards compatibility
 _MAX_CHOICE_OPTIONS = 255
+
+_PROVIDERS: dict[str, tuple[str, str, str]] = {
+    # provider: (env var, url, default model)
+    "typesafe": ("TYPESAFE_API_KEY", TYPESAFE_URL, TYPESAFE_MODEL),
+    "gateway": ("AI_GATEWAY_API_KEY", GATEWAY_URL, GATEWAY_MODEL),
+}
+
+
+def detect_provider() -> Provider | None:
+    """TypeSafe's own API if TYPESAFE_API_KEY is set, else Vercel AI Gateway."""
+    if os.environ.get("TYPESAFE_API_KEY"):
+        return "typesafe"
+    if os.environ.get("AI_GATEWAY_API_KEY"):
+        return "gateway"
+    return None
 
 
 class Reranker(Protocol):
@@ -29,23 +49,34 @@ Transport = Callable[[dict[str, Any]], dict[str, Any]]
 
 
 class JevReranker:
-    """Re-rank BM25 candidates with TypeSafe AI's Jev via Vercel AI Gateway.
+    """Re-rank BM25 candidates with TypeSafe AI's Jev.
 
     Jev is a decision model, not an LLM: given the user's query and the
     candidate tools as a ``choice`` question, it returns a calibrated
     probability for every candidate in one ~400 ms request. On Dehydrator's
     30-query MCP benchmark this lifts top-1 accuracy from 93% to 100%.
 
+    Two providers speak the same request shape:
+
+    * ``"typesafe"``: TypeSafe's own API, ``TYPESAFE_API_KEY``,
+      ``https://api.typesafe.ai/v1/systemone``, model ``jev-latest``.
+    * ``"gateway"``: Vercel AI Gateway, ``AI_GATEWAY_API_KEY``,
+      ``https://ai-gateway.vercel.sh/v1/evaluate``, model ``typesafe-ai/jev``.
+
+    With no ``provider`` given, TypeSafe is used when ``TYPESAFE_API_KEY``
+    is set, otherwise the gateway.
+
     The BM25 order is kept as a fallback whenever the request fails, so
     enabling the reranker can never make search worse than plain BM25.
 
     Args:
-        api_key: Vercel AI Gateway key. Defaults to ``AI_GATEWAY_API_KEY``.
-        model: Evaluation model id (default ``typesafe-ai/jev``).
+        api_key: API key for the provider. Defaults to the provider's env var.
+        provider: ``"typesafe"`` or ``"gateway"``; auto-detected from env.
+        model: Model id; defaults to the provider's default.
         min_probability: Drop candidates Jev scores below this (0 keeps all).
         timeout: Request timeout in seconds.
-        retries: Extra attempts on 429/5xx with exponential backoff. The
-            gateway throttles above a few concurrent requests.
+        retries: Extra attempts on 429/529/5xx with exponential backoff.
+        url: Override the endpoint (e.g. a proxy).
         transport: Optional callable ``(request_body) -> response_json`` used
             instead of HTTP; for tests.
     """
@@ -54,24 +85,32 @@ class JevReranker:
         self,
         api_key: str | None = None,
         *,
-        model: str = JEV_MODEL,
+        provider: Provider | None = None,
+        model: str | None = None,
         min_probability: float = 0.0,
         timeout: float = 30.0,
         retries: int = 3,
-        url: str = GATEWAY_URL,
+        url: str | None = None,
         transport: Transport | None = None,
     ) -> None:
-        self._api_key = api_key or os.environ.get("AI_GATEWAY_API_KEY")
+        if provider is None:
+            provider = detect_provider() or "typesafe"
+        if provider not in _PROVIDERS:
+            raise ValueError(
+                f"provider must be 'typesafe' or 'gateway', got {provider!r}"
+            )
+        env_var, default_url, default_model = _PROVIDERS[provider]
+        self.provider: Provider = provider
+        self._api_key = api_key or os.environ.get(env_var)
         if not self._api_key and transport is None:
             raise ValueError(
-                "JevReranker needs an API key: pass api_key= or set "
-                "AI_GATEWAY_API_KEY."
+                f"JevReranker needs an API key: pass api_key= or set {env_var}."
             )
-        self._model = model
+        self._model = model or default_model
         self._min_probability = min_probability
         self._timeout = timeout
         self._retries = retries
-        self._url = url
+        self._url = url or default_url
         self._transport = transport or self._http_post
         self.last_probabilities: dict[str, float] = {}
         self.last_confidence: float | None = None
@@ -86,8 +125,7 @@ class JevReranker:
             tools = tools[:_MAX_CHOICE_OPTIONS]
             names = names[:_MAX_CHOICE_OPTIONS]
         criteria = {
-            get_tool_name(t): get_tool_description(t) or get_tool_name(t)
-            for t in tools
+            get_tool_name(t): get_tool_description(t) or get_tool_name(t) for t in tools
         }
         body = {
             "model": self._model,
@@ -136,21 +174,17 @@ class JevReranker:
                     result: dict[str, Any] = json.loads(resp.read())
                     return result
             except urllib.error.HTTPError as e:
-                retryable = e.code == 429 or e.code >= 500
+                retryable = e.code in (408, 429) or e.code >= 500
                 if retryable and attempt < self._retries:
                     time.sleep(delay)
                     delay *= 2
                     continue
                 detail = e.read()[:200]
-                raise RuntimeError(
-                    f"Jev request failed: {e.code} {detail!r}"
-                ) from e
+                raise RuntimeError(f"Jev request failed: {e.code} {detail!r}") from e
         raise RuntimeError("unreachable")
 
 
-def _extract_confidence(
-    data: dict[str, Any], answer: dict[str, Any]
-) -> float | None:
+def _extract_confidence(data: dict[str, Any], answer: dict[str, Any]) -> float | None:
     if "confidence" in answer:
         return float(answer["confidence"])
     meta = data.get("providerMetadata", {}).get("typesafe", {}).get("confidence", {})

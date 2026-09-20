@@ -1,6 +1,6 @@
 # Benchmarks
 
-Jev vs BM25 for routing MCP tool calls. 139 real tool definitions from six MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion), 30 hand-labelled queries. Run on 2026-09-20 with `dehydrator` 0.3.0 and `typesafe-ai/jev` via Vercel AI Gateway.
+[Jev](https://typesafe.ai) (TypeSafe AI) vs BM25 for routing MCP tool calls. 139 real tool definitions from six MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion), 30 hand-labelled queries. Run on 2026-09-20/21 with `dehydrator` 0.3.x. Jev was called both directly at TypeSafe AI's API (`jev-latest`, resolved to `jev-1.13.0`) and through Vercel AI Gateway (`typesafe-ai/jev`); rankings were identical, so the quality tables apply to both. Provider differences are in [Provider comparison](#provider-comparison).
 
 | | BM25 | BM25 → Jev | Jev only |
 |---|---:|---:|---:|
@@ -71,6 +71,21 @@ Separate check: 40 support tickets with known labels routed into 4 teams, one `c
 
 Accuracy 97.5%, Brier score 0.010. The one miss ("TypeError in the console on login page", technical vs account) came back at p=0.51 with confidence 0.34. A threshold at 0.7 would have sent it to a human.
 
+## Provider comparison
+
+Same code, same 30 queries, same three modes. Only the endpoint changed.
+
+| | TypeSafe AI API | Vercel AI Gateway |
+|---|---|---|
+| Endpoint | `api.typesafe.ai/v1/systemone` | `ai-gateway.vercel.sh/v1/evaluate` |
+| Model id | `jev-latest` | `typesafe-ai/jev` |
+| Rankings on the 30 queries | identical | identical |
+| Fallbacks during the run | 0 of 60 | 0 to 8 of 60 depending on load |
+| 16 requests, 8 in parallel | 1.7 s wall, 0 errors | 429 above ~3 concurrent |
+| Tournament, batch 50 (4 requests/search) | 30/30 top-1, MRR 100%, 2.7 s/search, 0 fallbacks | 25/30 top-1, ~10 s/search, 5 fallbacks (each miss was a fallback) |
+
+The gateway's concurrency limit is what made the tournament unreliable there. On TypeSafe's API the tournament is simply slower, not worse, so Jev-only scales past 200 tools without losing accuracy.
+
 ## Cost and latency
 
 | Setup | Requests | Input tokens | Wall time |
@@ -78,7 +93,7 @@ Accuracy 97.5%, Brier score 0.010. The one miss ("TypeError in the console on lo
 | 12 questions about one agent trace, one request | 1 | 742 | **378 ms** |
 | Same 12 questions, one request each | 12 | 4,779 | 24 s incl. 429 backoff |
 
-Price is $0.042 per million input tokens, output free. The gateway returns 429 above roughly 3 concurrent requests, so batch questions into one request and retry with backoff. One Jev question holds at most 255 options; `JevIndex` runs a tournament above that.
+Price is $0.042 per million input tokens, output free. Batch questions into one request where you can and retry 429/529 with backoff. One Jev question holds at most 255 options; `JevIndex` runs a tournament above that.
 
 ## Token savings
 
@@ -92,7 +107,7 @@ Independent of the ranker. Sending all tools in every request vs. one `tool_sear
 
 ## Method
 
-Jev is called as `typesafe-ai/jev` through Vercel AI Gateway. State is `{"user_request": query}`. The question is one `choice` whose options are the candidate tool names with their descriptions as criteria. Tools are ranked by the returned probability. Probabilities are rounded to two decimals by the gateway.
+Jev is called as `jev-latest` at TypeSafe AI's API, or as `typesafe-ai/jev` through Vercel AI Gateway. State is `{"user_request": query}`. The question is one `choice` whose options are the candidate tool names with their descriptions as criteria. Tools are ranked by the returned probability. Probabilities are rounded to two decimals by the gateway.
 
 Corpus and ground truth are in `benchmarks/_tools.py`. Each query has one or more correct tools.
 
@@ -102,5 +117,6 @@ Corpus and ground truth are in `benchmarks/_tools.py`. Each query has one or mor
 git clone https://github.com/Arrmlet/dehydrator && cd dehydrator && uv sync
 uv run python benchmarks/search_quality.py                                  # BM25, offline
 uv run python benchmarks/token_savings_openai.py                            # token savings, offline
-AI_GATEWAY_API_KEY=vck_... uv run python benchmarks/search_quality_jev.py   # all three modes, ~60 requests
+TYPESAFE_API_KEY=apikey_... uv run python benchmarks/search_quality_jev.py  # all three modes, ~60 requests
+# or AI_GATEWAY_API_KEY=vck_... for the Vercel AI Gateway provider
 ```

@@ -31,13 +31,65 @@ def _fake(probabilities, confidence=0.9):
 
 def test_requires_key_without_transport(monkeypatch):
     monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
-    with pytest.raises(ValueError, match="API key"):
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    with pytest.raises(ValueError, match="TYPESAFE_API_KEY"):
         JevReranker()
+    with pytest.raises(ValueError, match="AI_GATEWAY_API_KEY"):
+        JevReranker(provider="gateway")
+
+
+def test_provider_detection(monkeypatch):
+    from dehydrator import detect_provider
+    from dehydrator._jev import GATEWAY_URL, TYPESAFE_URL
+
+    monkeypatch.delenv("AI_GATEWAY_API_KEY", raising=False)
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    assert detect_provider() is None
+    monkeypatch.setenv("AI_GATEWAY_API_KEY", "vck")
+    assert detect_provider() == "gateway"
+    r = JevReranker()
+    assert (r.provider, r._url, r._model) == ("gateway", GATEWAY_URL, "typesafe-ai/jev")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "apikey")
+    assert detect_provider() == "typesafe"
+    r = JevReranker()
+    assert (r.provider, r._url, r._model) == ("typesafe", TYPESAFE_URL, "jev-latest")
+    r = JevReranker(provider="gateway", model="custom")
+    assert (r.provider, r._model) == ("gateway", "custom")
+    with pytest.raises(ValueError, match="provider"):
+        JevReranker(provider="other")  # type: ignore[arg-type]
+
+
+def test_typesafe_response_shape():
+    """Official API: confidence inside the answer, snake_case usage."""
+    calls: list[dict] = []
+
+    def transport(body):
+        calls.append(body)
+        return {
+            "model": "jev-1.13.0",
+            "answers": {
+                "tool": {
+                    "type": "choice",
+                    "choice": "send_email",
+                    "confidence": 1.0,
+                    "probabilities": {"get_weather": 0.0, "send_email": 1.0},
+                }
+            },
+            "usage": {"input_tokens": 384, "output_tokens": 58},
+        }
+
+    r = JevReranker(provider="typesafe", transport=transport)
+    assert r.rerank("email my boss", [TOOLS[0], TOOLS[1]]) == [
+        "send_email",
+        "get_weather",
+    ]
+    assert calls[0]["model"] == "jev-latest"
+    assert r.last_confidence == 1.0
 
 
 def test_request_shape():
     t = _fake({"get_weather": 0.9, "send_email": 0.1})
-    r = JevReranker(transport=t)
+    r = JevReranker(provider="gateway", transport=t)
     r.rerank("weather in Tokyo", [TOOLS[0], TOOLS[1]])
     body = t.calls[0]
     assert body["model"] == "typesafe-ai/jev"

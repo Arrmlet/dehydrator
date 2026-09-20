@@ -2,7 +2,6 @@ import pytest
 
 from dehydrator._index import ToolIndex
 
-
 TOOLS = [
     {
         "name": "get_weather",

@@ -1,6 +1,6 @@
 [project]
 name = "dehydrator"
-version = "0.3.0"
+version = "0.3.1"
 description = "Client-side BM25 tool search for LLM APIs — Anthropic, OpenAI-compatible, MCP — with optional Jev re-ranking"
 readme = "README.md"
 license = "MIT"
