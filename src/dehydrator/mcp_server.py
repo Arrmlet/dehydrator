@@ -89,9 +89,7 @@ async def lifespan(_: MCPServer[State]) -> AsyncIterator[State]:
                 owner[t.name] = name
                 tools.append(mcp_tool_to_dict(t))
             _log(f"upstream {name}: {len(listed)} tools")
-        use_jev = bool(os.environ.get("AI_GATEWAY_API_KEY")) and not os.environ.get(
-            "NO_JEV"
-        )
+        use_jev = detect_provider() is not None and not os.environ.get("NO_JEV")
         reranker = JevReranker() if use_jev else None
         if SEARCH == "jev":
             if reranker is None:
