@@ -358,6 +358,8 @@ client.reset_discoveries()
 
 ## Benchmarks
 
+Full results, failure cases and calibration check: **[BENCHMARKS.md](BENCHMARKS.md)**.
+
 Benchmarked against **139 real tool definitions** from 6 popular MCP servers (Chrome DevTools, GitHub, Playwright, Filesystem, Git, Notion) and 30 ground-truth queries.
 
 ### Token savings
